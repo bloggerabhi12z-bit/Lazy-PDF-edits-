@@ -1,0 +1,13 @@
+{
+  "name": "Lazy PDF — In-browser PDF toolkit",
+  "short_name": "Lazy PDF",
+  "description": "Merge, split, compress, convert, and edit PDFs directly in your browser. Fast, private, free.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#faf7f2",
+  "icons": [
+    { "src": "/favicon.ico", "sizes": "any", "type": "image/x-icon" }
+  ]
+}

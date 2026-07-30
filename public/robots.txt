@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Block internal / preview surfaces
+Disallow: /lovable/
+
+# Discovery — root-relative so it stays correct at any host
+Sitemap: /sitemap.xml
