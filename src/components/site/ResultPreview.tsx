@@ -66,6 +66,8 @@ export function ResultPreview() {
                 <PdfCanvasPreview url={result.url} name={result.name} />
               ) : result.mime.startsWith("image/") ? (
                 <div className="grid min-h-[300px] place-items-center rounded-xl bg-white p-5 shadow-inner"><img src={result.url} alt={result.name} className="max-h-[420px] max-w-full object-contain" /></div>
+              ) : result.mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? (
+                <DocxPreview url={result.url} />
               ) : result.mime.startsWith("text/") ? (
                 <TextPreview url={result.url} />
               ) : (
@@ -108,6 +110,48 @@ function TextPreview({ url }: { url: string }) {
     <pre className="h-[420px] overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs text-ink">
       {text || "Loading…"}
     </pre>
+  );
+}
+
+function DocxPreview({ url }: { url: string }) {
+  const [html, setHtml] = useState<string>("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHtml("");
+    setFailed(false);
+
+    (async () => {
+      try {
+        const { default: mammoth } = await import("mammoth/mammoth.browser");
+        const response = await fetch(url);
+        const result = await mammoth.convertToHtml({ arrayBuffer: await response.arrayBuffer() });
+        if (!cancelled) setHtml(result.value);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [url]);
+
+  return (
+    <div className="h-[520px] overflow-auto rounded-xl bg-slate-200/70 p-4 shadow-inner sm:h-[620px]">
+      {failed ? (
+        <div className="grid h-full min-h-[300px] place-items-center text-center text-sm text-muted-foreground">
+          This Word document could not be previewed. Download it to view.
+        </div>
+      ) : html ? (
+        <article className="prose prose-sm mx-auto min-h-full max-w-3xl bg-white px-8 py-10 text-ink shadow-lg prose-headings:font-display prose-headings:text-ink prose-p:text-ink prose-a:text-signal">
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+        </article>
+      ) : (
+        <div className="grid h-full min-h-[300px] place-items-center text-xs text-muted-foreground animate-pulse">
+          Generating Word preview...
+        </div>
+      )}
+    </div>
   );
 }
 
