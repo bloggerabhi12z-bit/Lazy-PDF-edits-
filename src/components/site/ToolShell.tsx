@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 import { Header } from "@/components/site/Header";
@@ -97,16 +97,20 @@ const toolTabs = [
 
 function ToolTabs({ activeSlug }: { activeSlug: string }) {
   const activeGroup = toolTabs.find((group) => group.tools.some(([slug]) => slug === activeSlug)) ?? toolTabs[0];
+  const [openGroup, setOpenGroup] = useState<string | null>(activeGroup.label);
 
   return (
     <nav className="mt-8 rounded-2xl border border-border bg-card p-2 shadow-sm" aria-label="PDF tool navigation">
       <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0">
         {toolTabs.map((group) => {
           const active = group === activeGroup;
+          const open = openGroup === group.label;
           return (
-            <div key={group.label} className="group relative shrink-0">
+            <div key={group.label} className="relative shrink-0">
               <button
                 type="button"
+                onClick={() => setOpenGroup(open ? null : group.label)}
+                aria-expanded={open}
                 className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
                   active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                 }`}
@@ -115,11 +119,12 @@ function ToolTabs({ activeSlug }: { activeSlug: string }) {
                 {group.label}
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
-              <div className="invisible absolute left-0 top-full z-30 mt-2 min-w-48 translate-y-1 rounded-xl border border-border bg-card p-1.5 opacity-0 shadow-xl transition-all group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100">
+              {open && <div className="absolute left-0 top-full z-30 mt-2 min-w-48 rounded-xl border border-border bg-card p-1.5 shadow-xl">
                 {group.tools.map(([slug, label]) => (
                   <Link
                     key={slug}
                     to="/tools/$slug"
+                    onClick={() => setOpenGroup(null)}
                     params={{ slug }}
                     className={`block rounded-lg px-3 py-2 text-sm transition-colors ${
                       slug === activeSlug ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -128,7 +133,7 @@ function ToolTabs({ activeSlug }: { activeSlug: string }) {
                     {label}
                   </Link>
                 ))}
-              </div>
+              </div>}
             </div>
           );
         })}
