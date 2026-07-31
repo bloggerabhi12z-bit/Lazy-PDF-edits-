@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/lib/supabase";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 const AuthContext = createContext<{ user: User | null; loading: boolean }>({ user: null, loading: true });
 
@@ -18,6 +18,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+
+    if (!isSupabaseConfigured) {
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
 
     supabase.auth.getSession().then(({ data }) => {
       if (active) {

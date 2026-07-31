@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { supabase } from "@/lib/supabase";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -14,6 +14,10 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [password, setPassword] = useState("");
 
   const submit = async () => {
+    if (!isSupabaseConfigured) {
+      toast.error("Authentication is not configured yet.");
+      return;
+    }
     if (!email || password.length < 8) {
       toast.error("Enter a valid email and a password of at least 8 characters.");
       return;
@@ -38,6 +42,10 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   };
 
   const oauthLogin = async (provider: "google" | "github") => {
+    if (!isSupabaseConfigured) {
+      toast.error("Authentication is not configured yet.");
+      return;
+    }
     try {
       const { error } = await supabase.auth.signInWithOAuth({ provider });
       if (error) throw error;
@@ -47,6 +55,10 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   };
 
   const recover = async () => {
+    if (!isSupabaseConfigured) {
+      toast.error("Authentication is not configured yet.");
+      return;
+    }
     if (!email) return toast.error("Enter your email first.");
     setBusy(true);
     try {
