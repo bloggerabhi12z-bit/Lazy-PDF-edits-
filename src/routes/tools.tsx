@@ -6,6 +6,18 @@ import { TOOLS, CATEGORIES } from "@/lib/tools-registry";
 import { ArrowRight, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
+const primaryGroups = [
+  { label: "PDF Organization", slugs: ["merge", "split", "delete-pages", "extract-pages", "rearrange-pages", "rotate", "scan-to-pdf"] },
+  { label: "PDF Optimization", slugs: ["compress", "repair"] },
+  { label: "Convert to PDF", slugs: ["jpg-to-pdf", "word-to-pdf", "powerpoint-to-pdf", "excel-to-pdf", "html-to-pdf"] },
+  { label: "Convert from PDF", slugs: ["pdf-to-jpg", "pdf-to-word", "pdf-to-powerpoint", "pdf-to-excel", "pdf-to-pdfa"] },
+  { label: "PDF Editing", slugs: ["edit", "page-numbers", "watermark", "remove-watermark", "crop"] },
+  { label: "PDF Security", slugs: ["protect", "unlock", "sign", "redact"] },
+  { label: "OCR", slugs: ["ocr", "ocr-images", "searchable-pdf"] },
+  { label: "Utility Tools", slugs: ["compare", "flatten", "extract-images", "remove-images", "extract-text", "metadata"] },
+] as const;
+const primarySlugs = new Set(primaryGroups.flatMap((group) => group.slugs));
+
 export const Route = createFileRoute("/tools")({
   component: () => <Outlet />,
 });
@@ -60,43 +72,41 @@ export function ToolsIndex() {
           </section>
         )}
 
-        {CATEGORIES.map((cat) => {
-          const items = TOOLS.filter((t) => t.category === cat.id && matches(t));
+        {primaryGroups.map((group) => {
+          const items = group.slugs.map((slug) => TOOLS.find((tool) => tool.slug === slug)).filter((tool) => tool && matches(tool)) as typeof TOOLS;
           if (!items.length) return null;
-          return (
-            <section key={cat.id} className="mt-14">
-              <h2 className="font-display text-2xl">{cat.label}</h2>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {items.map((tool) => (
-                  <Link
-                    key={tool.slug}
-                    to="/$slug"
-                    params={{ slug: tool.seoSlug }}
-                    onClick={() => rememberTool(tool.slug)}
-                    className="group relative rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-signal hover:shadow-lg"
-                  >
-                    {tool.status === "soon" && (
-                      <span className="absolute right-3 top-3 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                        Soon
-                      </span>
-                    )}
-                    <div className={`inline-grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br ${tool.accentClass}`}>
-                      <tool.icon className="h-5 w-5 text-ink" />
-                    </div>
-                    <div className="mt-4 font-display text-lg">{tool.name}</div>
-                    <p className="mt-1 text-sm text-muted-foreground">{tool.tagline}</p>
-                    <div className="mt-4 inline-flex items-center text-sm font-medium text-signal">
-                      Open <ArrowRight className="ml-1 h-4 w-4" />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          );
+          return <ToolGroup key={group.label} label={group.label} items={items} rememberTool={rememberTool} />;
         })}
+
+        <div className="mt-16 border-t border-border pt-10">
+          <h2 className="font-display text-3xl">More tools</h2>
+          {CATEGORIES.map((cat) => {
+            const items = TOOLS.filter((tool) => !primarySlugs.has(tool.slug) && tool.category === cat.id && matches(tool));
+            if (!items.length) return null;
+            return <ToolGroup key={cat.id} label={cat.label} items={items} rememberTool={rememberTool} compact />;
+          })}
+        </div>
 
       </main>
       <Footer />
     </div>
+  );
+}
+
+function ToolGroup({ label, items, rememberTool, compact = false }: { label: string; items: typeof TOOLS; rememberTool: (slug: string) => void; compact?: boolean }) {
+  return (
+    <section className={compact ? "mt-10" : "mt-12"}>
+      <h2 className="font-display text-2xl">{label}</h2>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((tool) => (
+          <Link key={tool.slug} to="/$slug" params={{ slug: tool.seoSlug }} onClick={() => rememberTool(tool.slug)} className="group relative rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-signal hover:shadow-lg">
+            <div className={`inline-grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br ${tool.accentClass}`}><tool.icon className="h-5 w-5 text-ink" /></div>
+            <div className="mt-4 font-display text-lg">{tool.name}</div>
+            <p className="mt-1 text-sm text-muted-foreground">{tool.tagline}</p>
+            <div className="mt-4 inline-flex items-center text-sm font-medium text-signal">Open <ArrowRight className="ml-1 h-4 w-4" /></div>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
