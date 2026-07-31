@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Download, X, FileCheck2 } from "lucide-react";
+import { Download, X, FileCheck2, FileText, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLastResult } from "@/lib/result-store";
 import { publishResult } from "@/lib/result-store";
@@ -8,7 +8,6 @@ import { formatBytes } from "@/lib/download";
 
 export function ResultPreview() {
   const result = useLastResult();
-  const [thumb, setThumb] = useState<string | null>(null);
 
   const recordDownload = () => {
     if (!result) return;
@@ -25,7 +24,6 @@ export function ResultPreview() {
   };
 
   useEffect(() => {
-    setThumb(null);
     if (!result) return;
     // Scroll preview into view so users can review before downloading
     setTimeout(() => {
@@ -33,27 +31,6 @@ export function ResultPreview() {
     }, 50);
     let cancelled = false;
 
-    if (result.mime.startsWith("image/")) {
-      setThumb(result.url);
-      return;
-    }
-
-    if (result.mime === "application/pdf") {
-      (async () => {
-        try {
-          const { loadPdf, renderPdfPageToCanvas, canvasToBlob } = await import("@/lib/pdf-render");
-          const res = await fetch(result.url);
-          const blob = await res.blob();
-          const file = new File([blob], result.name, { type: "application/pdf" });
-          const pdf = await loadPdf(file);
-          const canvas = await renderPdfPageToCanvas(pdf, 1, 1.2);
-          const previewBlob = await canvasToBlob(canvas, "image/png");
-          if (!cancelled) setThumb(URL.createObjectURL(previewBlob));
-        } catch {
-          /* noop */
-        }
-      })();
-    }
     return () => { cancelled = true; };
   }, [result]);
 
@@ -65,65 +42,54 @@ export function ResultPreview() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 12 }}
-          className="mt-8 overflow-hidden rounded-3xl border border-signal/40 bg-signal-soft/40 p-6"
+          className="mt-10 overflow-hidden rounded-3xl border border-border bg-card shadow-[0_24px_70px_-40px_var(--ink)]"
         >
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-primary text-primary-foreground">
+          <div className="flex flex-col gap-5 border-b border-border px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+            <div className="flex items-center gap-3.5">
+              <div className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-xl bg-signal-soft text-foreground">
                 <FileCheck2 className="h-5 w-5" />
               </div>
               <div>
-                <div className="font-display text-xl">Preview your file</div>
-                <div className="text-sm text-muted-foreground">
-                  {result.name} · {formatBytes(result.size)}
-                </div>
+                <div className="font-display text-2xl">Your file is ready</div>
+                <div className="mt-0.5 text-sm text-muted-foreground">Review the result before downloading.</div>
               </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => publishResult(null)} aria-label="Dismiss preview">
-              <X className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <Button variant="ghost" size="sm" onClick={() => publishResult(null)}><RotateCcw className="mr-2 h-4 w-4" />Start over</Button>
+              <Button variant="ghost" size="icon" onClick={() => publishResult(null)} aria-label="Dismiss preview"><X className="h-4 w-4" /></Button>
+            </div>
           </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Review the output below. When it looks right, tap Download.
-          </p>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
-            <div className="rounded-2xl border border-border bg-card/60 p-3">
+          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="min-w-0 border-b border-border bg-secondary/35 p-4 sm:p-6 lg:border-b-0 lg:border-r">
               {result.mime === "application/pdf" ? (
                 <PdfCanvasPreview url={result.url} name={result.name} />
               ) : result.mime.startsWith("image/") ? (
-                <img src={result.url} alt={result.name} className="mx-auto max-h-[420px] rounded-xl bg-white object-contain" />
+                <div className="grid min-h-[300px] place-items-center rounded-xl bg-white p-5 shadow-inner"><img src={result.url} alt={result.name} className="max-h-[420px] max-w-full object-contain" /></div>
               ) : result.mime.startsWith("text/") ? (
                 <TextPreview url={result.url} />
               ) : (
-                <div className="grid h-[220px] place-items-center text-sm text-muted-foreground">
+                <div className="grid min-h-[300px] place-items-center rounded-xl bg-secondary text-sm text-muted-foreground">
                   No inline preview for this file type — download to view.
                 </div>
               )}
             </div>
-            <div className="rounded-2xl border border-border bg-card/60 p-3">
-              <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Thumbnail</div>
-              <div className="grid h-[220px] place-items-center overflow-hidden rounded-xl bg-white">
-                {thumb ? (
-                  <img src={thumb} alt="" className="max-h-full max-w-full object-contain" />
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    {result.mime === "application/pdf" ? "Rendering…" : "—"}
-                  </div>
-                )}
+            <aside className="flex flex-col justify-between gap-8 p-5 sm:p-7">
+              <div>
+                <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"><FileText className="h-4 w-4" />Output file</div>
+                <div className="break-words text-lg font-semibold leading-snug">{result.name}</div>
+                <dl className="mt-5 divide-y divide-border border-y border-border text-sm">
+                  <div className="flex justify-between gap-4 py-3"><dt className="text-muted-foreground">Format</dt><dd className="font-medium uppercase">{result.mime.split("/").pop()}</dd></div>
+                  <div className="flex justify-between gap-4 py-3"><dt className="text-muted-foreground">Size</dt><dd className="font-medium">{formatBytes(result.size)}</dd></div>
+                </dl>
+                <div className="mt-5 flex gap-2 text-xs leading-relaxed text-muted-foreground"><ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-signal" />Files are processed in your browser and are not stored.</div>
               </div>
-            </div>
+              <Button asChild size="lg" className="w-full"><a href={result.url} download={result.name} onClick={recordDownload}><Download className="mr-2 h-5 w-5" />Download file</a></Button>
+            </aside>
           </div>
-
-          <div className="mt-6 flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
-            <Button variant="ghost" onClick={() => publishResult(null)}>
-              Discard
-            </Button>
-            <Button asChild size="lg" className="sm:min-w-56">
-              <a href={result.url} download={result.name} onClick={recordDownload}>
-                <Download className="mr-2 h-5 w-5" /> Download {result.name}
-              </a>
-            </Button>
+          <div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted-foreground sm:px-7">
+            <span>Output generated successfully</span>
+            <span className="hidden sm:inline">Ready to use</span>
           </div>
         </motion.section>
       )}
@@ -189,17 +155,17 @@ function PdfCanvasPreview({ url, name }: { url: string; name: string }) {
   }, [url, name]);
 
   return (
-    <div className="h-[460px] overflow-auto rounded-xl bg-white p-4 shadow-inner">
+    <div className="h-[520px] overflow-auto rounded-xl bg-slate-200/70 p-4 shadow-inner sm:h-[620px]">
       {loading && pages.length === 0 && (
         <div className="grid h-full place-items-center text-xs text-muted-foreground animate-pulse">
           Generating core file previews...
         </div>
       )}
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col items-center gap-5">
         {pages.map((src, i) => (
           <div key={i} className="relative w-full flex flex-col items-center">
-            <img src={src} alt={`Page ${i + 1}`} className="max-w-full rounded shadow-md border border-border/40" />
-            <span className="text-[10px] mt-1 text-muted-foreground font-medium">Page {i + 1} of {total}</span>
+            <div className="rounded-sm bg-white p-1 shadow-lg"><img src={src} alt={`Page ${i + 1}`} className="max-w-full border border-border/40" /></div>
+            <span className="text-[10px] font-medium text-muted-foreground">Page {i + 1} of {total}</span>
           </div>
         ))}
         {loading && pages.length > 0 && (

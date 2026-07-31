@@ -3,7 +3,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import JSZip from "jszip";
 import mammoth from "mammoth/mammoth.browser";
 import PptxGenJS from "pptxgenjs";
-import { Document, Packer, Paragraph, TextRun } from "docx";
+import { Document, ImageRun, Packer, Paragraph } from "docx";
 import { createWorker } from "tesseract.js";
 import { DropZone } from "@/components/site/DropZone";
 import { ToolProgressBar } from "@/components/site/ToolProgressBar";
@@ -1107,26 +1107,96 @@ export function PdfToExcelTool() {
 function PdfTextExportTool({ type }: { type: "word" | "excel" }) {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<Array<{ page: number; text: string }>>([]);
+  const [previewImages, setPreviewImages] = useState<Array<{ page: number; url: string }>>([]);
+  const [previewBusy, setPreviewBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls: string[] = [];
+    setPreview([]);
+    setPreviewImages([]);
+    if (!file) {
+      setPreviewBusy(false);
+      return;
+    }
+
+    setPreviewBusy(true);
+    if (type === "word") {
+      (async () => {
+        try {
+          const pdf = await loadPdf(file);
+          const previewCount = Math.min(pdf.numPages, 8);
+          for (let pageNumber = 1; pageNumber <= previewCount; pageNumber += 1) {
+            const canvas = await renderPdfPageToCanvas(pdf, pageNumber, 1.2);
+            const blob = await canvasToBlob(canvas, "image/jpeg", 0.88);
+            const url = URL.createObjectURL(blob);
+            objectUrls.push(url);
+            if (!cancelled) setPreviewImages((current) => [...current, { page: pageNumber, url }]);
+          }
+        } catch {
+          if (!cancelled) toast.error("Could not render this PDF preview.");
+        } finally {
+          if (!cancelled) setPreviewBusy(false);
+        }
+      })();
+    } else {
+      extractPdfText(file)
+        .then((pages) => {
+          if (!cancelled) setPreview(pages.map((text, index) => ({ page: index + 1, text })));
+        })
+        .catch(() => {
+          if (!cancelled) toast.error("Could not read text from this PDF.");
+        })
+        .finally(() => {
+          if (!cancelled) setPreviewBusy(false);
+        });
+    }
+
+    return () => {
+      cancelled = true;
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [file, type]);
+
   async function run() {
     if (!file) return;
     setBusy(true);
     try {
-      const pages = await extractPdfText(file);
       if (type === "word") {
-        const doc = new Document({
-          sections: [
-            {
-              children: pages.flatMap((page, index) => [
-                new Paragraph({
-                  children: [new TextRun({ text: `Page ${index + 1}`, bold: true })],
-                }),
-                ...page
-                  .split(/(?<=[.!?])\s+/)
-                  .filter(Boolean)
-                  .map((line) => new Paragraph(line)),
-              ]),
+        const pdf = await loadPdf(file);
+        const sections = [];
+        const renderScale = 1.5;
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          const canvas = await renderPdfPageToCanvas(pdf, pageNumber, renderScale);
+          const image = await canvasToBlob(canvas, "image/png");
+          const pageWidthPoints = canvas.width / renderScale;
+          const pageHeightPoints = canvas.height / renderScale;
+          const imageWidth = Math.round((pageWidthPoints / 72) * 96);
+          const imageHeight = Math.round((pageHeightPoints / 72) * 96);
+          sections.push({
+            properties: {
+              page: {
+                margin: { top: 0, right: 0, bottom: 0, left: 0 },
+                size: { width: Math.round(pageWidthPoints * 20), height: Math.round(pageHeightPoints * 20) },
+              },
             },
-          ],
+            children: [
+              new Paragraph({
+                spacing: { before: 0, after: 0, line: 240 },
+                children: [
+                  new ImageRun({
+                    type: "png",
+                    data: new Uint8Array(await image.arrayBuffer()),
+                    transformation: { width: imageWidth, height: imageHeight },
+                  }),
+                ],
+              }),
+            ],
+          });
+        }
+        const doc = new Document({
+          sections,
         });
         downloadBlob(
           await Packer.toBlob(doc),
@@ -1161,8 +1231,53 @@ function PdfTextExportTool({ type }: { type: "word" | "excel" }) {
         onFile={setFile}
         hint={`Drop a PDF to export text to ${type === "word" ? "Word" : "Excel"}.`}
       />
-      <div className="flex justify-end">
-        <Button variant="action" size="xl" onClick={run} disabled={!file || busy}>
+      {file && type === "word" && (previewBusy || previewImages.length > 0) && (
+        <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm" aria-live="polite">
+          <div className="border-b border-border px-5 py-4 sm:px-6">
+            <h2 className="font-display text-2xl">Document preview</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              This preview keeps the original page layout, spacing, and alignment.
+            </p>
+          </div>
+          <div className="max-h-[42rem] space-y-5 overflow-auto bg-secondary/35 p-4 sm:p-6">
+            {previewBusy && <div className="rounded-xl bg-white p-5 text-sm text-slate-500">Rendering document pages...</div>}
+            {!previewBusy && previewImages.map((page) => (
+              <article key={page.page} className="flex flex-col items-center gap-2">
+                <div className="w-full max-w-3xl rounded-sm bg-white p-1 shadow-lg">
+                  <img src={page.url} alt={`Page ${page.page}`} className="block h-auto w-full" />
+                </div>
+                <span className="text-xs font-medium text-muted-foreground">Page {page.page}</span>
+              </article>
+            ))}
+            {!previewBusy && previewImages.length === 8 && (
+              <div className="text-center text-xs text-muted-foreground">Preview shows the first 8 pages.</div>
+            )}
+          </div>
+        </section>
+      )}
+      {file && type === "excel" && (previewBusy || preview.length > 0) && (
+        <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm" aria-live="polite">
+          <div className="border-b border-border px-5 py-4 sm:px-6">
+            <h2 className="font-display text-2xl">Text preview</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Review the extracted text before exporting it to {type === "word" ? "Word" : "Excel"}.
+            </p>
+          </div>
+          <div className="max-h-[28rem] space-y-5 overflow-auto bg-secondary/35 p-4 sm:p-6">
+            {previewBusy && <div className="rounded-xl bg-white p-5 text-sm text-slate-500">Reading PDF text...</div>}
+            {!previewBusy && preview.map((page) => (
+              <article key={page.page} className="rounded-xl bg-white p-5 text-slate-900 shadow-sm">
+                <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Page {page.page}
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-7">{page.text || "No text found on this page."}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      <div className="flex w-full justify-stretch sm:justify-end">
+        <Button variant="action" size="xl" className="w-full sm:w-auto" onClick={run} disabled={!file || busy}>
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Export to{" "}
           {type === "word" ? "Word" : "Excel"}
         </Button>

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Github, Loader2, Mail } from "lucide-react";
-import { login, oauthLogin, requestPasswordRecovery, signup } from "@netlify/identity";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { supabase } from "@/lib/supabase";
 
 export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -20,9 +20,15 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     }
     setBusy(true);
     try {
-      if (mode === "login") await login(email, password);
-      else await signup(email, password);
-      toast.success(mode === "login" ? "Welcome back." : "Check your inbox to verify your email.");
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        toast.success("Welcome back.");
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        toast.success("Check your inbox to verify your email.");
+      }
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Authentication failed.");
@@ -31,11 +37,21 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     }
   };
 
+  const oauthLogin = async (provider: "google" | "github") => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({ provider });
+      if (error) throw error;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "OAuth sign-in failed.");
+    }
+  };
+
   const recover = async () => {
     if (!email) return toast.error("Enter your email first.");
     setBusy(true);
     try {
-      await requestPasswordRecovery(email);
+      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      if (error) throw error;
       toast.success("Password recovery email sent.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Recovery could not be started.");
@@ -53,8 +69,8 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => oauthLogin("google")}><Mail className="mr-2 h-4 w-4" />Google</Button>
-            <Button variant="outline" onClick={() => oauthLogin("github")}><Github className="mr-2 h-4 w-4" />GitHub</Button>
+            <Button variant="outline" onClick={() => void oauthLogin("google")}><Mail className="mr-2 h-4 w-4" />Google</Button>
+            <Button variant="outline" onClick={() => void oauthLogin("github")}><Github className="mr-2 h-4 w-4" />GitHub</Button>
           </div>
           <div className="relative my-1 text-center text-xs text-muted-foreground before:absolute before:inset-x-0 before:top-1/2 before:border-t before:border-border"><span className="relative bg-background px-2">or use email</span></div>
           <div className="grid gap-2"><Label htmlFor="auth-email">Email</Label><Input id="auth-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></div>

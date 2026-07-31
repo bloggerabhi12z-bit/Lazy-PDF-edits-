@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { FileStack, LayoutDashboard, LogOut, Menu, Moon, Sun, UserRound, X } from "lucide-react";
-import { logout } from "@netlify/identity";
 import { toast } from "sonner";
 import { AuthDialog } from "@/components/site/AuthDialog";
 import { useAuth } from "@/components/site/AuthProvider";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabase";
 
 export function Header() {
   const { user } = useAuth();
@@ -29,7 +29,8 @@ export function Header() {
 
   const signOut = async () => {
     try {
-      await logout();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
       toast.success("Signed out.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not sign out.");
