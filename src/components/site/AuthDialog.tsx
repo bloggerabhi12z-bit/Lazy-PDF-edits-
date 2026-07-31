@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Github, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,13 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const submit = async () => {
+  useEffect(() => {
+    if (!open) return;
+    setBusy(false);
+  }, [open]);
+
+  const submit = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     if (!isSupabaseConfigured) {
       toast.error("Authentication is not configured yet.");
       return;
@@ -79,7 +85,12 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           <DialogTitle>{mode === "login" ? "Sign in to Lazy PDF" : "Create your account"}</DialogTitle>
           <DialogDescription>Sync processing history and favorites. Your document contents still stay on your device.</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
+        {!isSupabaseConfigured && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Sign in is temporarily unavailable because authentication has not been configured for this deployment.
+          </div>
+        )}
+        <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" onClick={() => void oauthLogin("google")}><Mail className="mr-2 h-4 w-4" />Google</Button>
             <Button variant="outline" onClick={() => void oauthLogin("github")}><Github className="mr-2 h-4 w-4" />GitHub</Button>
@@ -87,10 +98,10 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           <div className="relative my-1 text-center text-xs text-muted-foreground before:absolute before:inset-x-0 before:top-1/2 before:border-t before:border-border"><span className="relative bg-background px-2">or use email</span></div>
           <div className="grid gap-2"><Label htmlFor="auth-email">Email</Label><Input id="auth-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></div>
           <div className="grid gap-2"><Label htmlFor="auth-password">Password</Label><Input id="auth-password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(); }} /></div>
-          <Button onClick={() => void submit()} disabled={busy}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{mode === "login" ? "Sign in" : "Create account"}</Button>
+          <Button type="submit" disabled={busy || !isSupabaseConfigured}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{mode === "login" ? "Sign in" : "Create account"}</Button>
           {mode === "login" && <Button variant="ghost" size="sm" onClick={() => void recover()} disabled={busy}>Forgot password?</Button>}
           <button className="text-sm text-muted-foreground hover:text-foreground" onClick={() => setMode(mode === "login" ? "signup" : "login")}>{mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}</button>
-        </div>
+        </form>
       </DialogContent>
     </Dialog>
   );
