@@ -1,5 +1,6 @@
 import {
   Combine,
+  Copy,
   Scissors,
   Minimize2,
   RotateCw,
@@ -7,6 +8,7 @@ import {
   Pencil,
   Trash2,
   FileOutput,
+  FileMinus2,
   MoveVertical,
   Crop,
   Lock,
@@ -30,6 +32,7 @@ import {
   FileSpreadsheet,
   Presentation,
   FileImage,
+  ImageDown,
   Code2,
   BookOpen,
   type LucideIcon,
@@ -66,6 +69,7 @@ export const TOOLS: ToolMeta[] = [
   { slug: "extract-pages", seoSlug: "extract-pdf-pages", name: "Extract Pages", tagline: "Pull specific pages into a new PDF.", description: "Select the pages you want and get a new document with just those.", keywords: ["extract pdf pages", "pull pages from pdf", "pdf page extractor", "save pdf pages"], icon: FileOutput, accentClass: "from-cyan-200 to-sky-200", status: "ready", category: "organize" },
   { slug: "delete-pages", seoSlug: "delete-pdf-pages", name: "Delete Pages", tagline: "Remove unwanted pages.", description: "Select the pages to drop and download the trimmed PDF.", keywords: ["delete pdf pages", "remove pages from pdf", "pdf page remover", "trim pdf"], icon: Trash2, accentClass: "from-red-200 to-rose-200", status: "ready", category: "organize" },
   { slug: "rearrange-pages", seoSlug: "rearrange-pdf-pages", name: "Rearrange Pages", tagline: "Reorder pages in a PDF.", description: "Drag pages into a new order and export in that sequence.", keywords: ["rearrange pdf pages", "reorder pdf", "pdf page order", "sort pdf pages"], icon: MoveVertical, accentClass: "from-lime-200 to-emerald-200", status: "ready", category: "organize" },
+  { slug: "duplicate-pages", seoSlug: "duplicate-pdf-pages", name: "Duplicate Pages", tagline: "Repeat a page in a PDF.", description: "Choose a page and insert one or more copies directly after it.", keywords: ["duplicate pdf pages", "copy pdf page", "repeat pdf page"], icon: Copy, accentClass: "from-cyan-200 to-blue-200", status: "ready", category: "organize" },
   { slug: "rotate", seoSlug: "rotate-pdf", name: "Rotate PDF", tagline: "Rotate pages in a document.", description: "Fix sideways scans instantly. Rotate 90°, 180°, or 270° across the document.", keywords: ["rotate pdf", "rotate pdf pages", "pdf rotator", "turn pdf sideways"], icon: RotateCw, accentClass: "from-rose-200 to-pink-200", status: "ready", category: "organize" },
   { slug: "crop", seoSlug: "crop-pdf", name: "Crop PDF", tagline: "Trim margins from pages.", description: "Trim the same margin from every page in a PDF.", keywords: ["crop pdf", "trim pdf margins", "pdf cropper", "resize pdf"], icon: Crop, accentClass: "from-stone-200 to-neutral-200", status: "ready", category: "organize" },
 
@@ -73,6 +77,7 @@ export const TOOLS: ToolMeta[] = [
   { slug: "compress", seoSlug: "compress-pdf", name: "Compress PDF", tagline: "Shrink a PDF's file size.", description: "Re-encodes objects and strips metadata to reduce file size.", keywords: ["compress pdf", "reduce pdf size", "pdf compressor", "shrink pdf", "make pdf smaller"], icon: Minimize2, accentClass: "from-emerald-200 to-teal-200", status: "ready", category: "optimize" },
   { slug: "repair", seoSlug: "repair-pdf", name: "Repair PDF", tagline: "Fix minor structural issues.", description: "Parses and re-saves the PDF, resolving many common corruption issues.", keywords: ["repair pdf", "fix corrupt pdf", "pdf repair tool", "recover pdf"], icon: Wrench, accentClass: "from-amber-200 to-yellow-200", status: "ready", category: "optimize" },
   { slug: "flatten", seoSlug: "flatten-pdf", name: "Flatten PDF", tagline: "Flatten form fields into content.", description: "Bakes form field values into the page so they can't be edited.", keywords: ["flatten pdf", "flatten pdf form", "lock pdf form", "pdf flattener"], icon: Layers, accentClass: "from-slate-200 to-zinc-200", status: "ready", category: "optimize" },
+  { slug: "remove-blank-pages", seoSlug: "remove-blank-pages-from-pdf", name: "Remove Blank Pages", tagline: "Clean empty text pages.", description: "Detect and remove pages with no extractable text.", keywords: ["remove blank pages", "delete empty pdf pages", "clean pdf"], icon: FileMinus2, accentClass: "from-orange-200 to-amber-200", status: "ready", category: "optimize" },
 
   // Edit
   { slug: "edit", seoSlug: "edit-pdf", name: "Edit PDF", tagline: "Add text to a PDF.", description: "Add text to the first page of an existing PDF.", keywords: ["edit pdf", "pdf editor", "edit pdf online", "add text to pdf"], icon: Pencil, accentClass: "from-fuchsia-200 to-pink-200", status: "ready", category: "edit" },
@@ -81,6 +86,7 @@ export const TOOLS: ToolMeta[] = [
   { slug: "page-numbers", seoSlug: "add-page-numbers-to-pdf", name: "Add Page Numbers", tagline: "Stamp page numbers.", description: "Add page numbers to every page with configurable position and format.", keywords: ["add page numbers to pdf", "pdf page numbers", "number pdf pages"], icon: Hash, accentClass: "from-indigo-200 to-violet-200", status: "ready", category: "edit" },
   { slug: "header-footer", seoSlug: "add-header-footer-to-pdf", name: "Header & Footer", tagline: "Add running headers and footers.", description: "Adds a text header and footer to every page.", keywords: ["add header footer pdf", "pdf header", "pdf footer"], icon: PanelTop, accentClass: "from-teal-200 to-cyan-200", status: "ready", category: "edit" },
   { slug: "metadata", seoSlug: "edit-pdf-metadata", name: "PDF Metadata Editor", tagline: "Edit title, author, subject.", description: "View and update the PDF's document metadata.", keywords: ["edit pdf metadata", "pdf properties", "change pdf author", "pdf title"], icon: Info, accentClass: "from-purple-200 to-fuchsia-200", status: "ready", category: "edit" },
+  { slug: "remove-metadata", seoSlug: "remove-pdf-metadata", name: "Remove Metadata", tagline: "Clear document properties.", description: "Remove common title, author, subject, keyword, creator, and producer fields.", keywords: ["remove pdf metadata", "strip pdf metadata", "clean pdf properties"], icon: Trash2, accentClass: "from-neutral-200 to-stone-200", status: "ready", category: "edit" },
   { slug: "redact", seoSlug: "redact-pdf", name: "Redact PDF", tagline: "Black-out content.", description: "Place a black redaction box on the first page.", keywords: ["redact pdf", "black out pdf", "hide pdf content", "pdf redaction"], icon: Highlighter, accentClass: "from-zinc-200 to-slate-200", status: "ready", category: "edit" },
   { slug: "compare", seoSlug: "compare-pdf", name: "Compare PDFs", tagline: "Text diff of two PDFs.", description: "Compare extracted text from two PDF files and download a report.", keywords: ["compare pdf", "pdf diff", "compare two pdfs", "pdf comparison"], icon: GitCompare, accentClass: "from-orange-200 to-amber-200", status: "ready", category: "edit" },
 
@@ -99,6 +105,7 @@ export const TOOLS: ToolMeta[] = [
   { slug: "html-to-pdf", seoSlug: "html-to-pdf", name: "HTML to PDF", tagline: "Convert HTML to PDF.", description: "Paste HTML and export its readable content as a PDF.", keywords: ["html to pdf", "convert html to pdf", "webpage to pdf"], icon: Code2, accentClass: "from-slate-200 to-gray-200", status: "ready", category: "convert-to" },
   { slug: "epub-to-pdf", seoSlug: "epub-to-pdf", name: "EPUB to PDF", tagline: "Convert an ebook to PDF.", description: "Extract EPUB chapter text and export it as a PDF.", keywords: ["epub to pdf", "ebook to pdf", "convert epub"], icon: BookOpen, accentClass: "from-yellow-200 to-amber-200", status: "ready", category: "convert-to" },
   { slug: "scan-to-pdf", seoSlug: "scan-to-pdf", name: "Scan to PDF", tagline: "Turn scans into a PDF.", description: "Upload scan photos or camera images and build a PDF.", keywords: ["scan to pdf", "camera to pdf", "photo to pdf", "receipt to pdf"], icon: ScanLine, accentClass: "from-cyan-200 to-teal-200", status: "ready", category: "convert-to" },
+  { slug: "markdown-to-pdf", seoSlug: "markdown-to-pdf", name: "Markdown to PDF", tagline: "Turn Markdown into a PDF.", description: "Write or upload Markdown and export a clean text PDF.", keywords: ["markdown to pdf", "md to pdf", "convert markdown"], icon: Code2, accentClass: "from-slate-200 to-gray-200", status: "ready", category: "convert-to" },
 
   // Convert FROM PDF
   { slug: "pdf-to-jpg", seoSlug: "pdf-to-jpg", name: "PDF to JPG", tagline: "Render pages as JPG images.", description: "Render every PDF page as a JPG and download a ZIP.", keywords: ["pdf to jpg", "pdf to jpeg", "pdf to image", "convert pdf to jpg"], icon: ImageIcon, accentClass: "from-fuchsia-200 to-pink-200", status: "ready", category: "convert-from" },
@@ -111,6 +118,8 @@ export const TOOLS: ToolMeta[] = [
   { slug: "extract-text", seoSlug: "extract-text-from-pdf", name: "Extract Text", tagline: "Get plain text out of a PDF.", description: "Extract selectable text from a PDF and download a text file.", keywords: ["extract text from pdf", "pdf to text", "copy text from pdf"], icon: FileText, accentClass: "from-teal-200 to-emerald-200", status: "ready", category: "convert-from" },
   { slug: "extract-images", seoSlug: "extract-images-from-pdf", name: "Extract Images", tagline: "Render pages as images.", description: "Export PDF pages as PNG images in a ZIP.", keywords: ["extract images from pdf", "pdf image extractor", "save pdf images"], icon: Images, accentClass: "from-pink-200 to-rose-200", status: "ready", category: "convert-from" },
   { slug: "ocr", seoSlug: "ocr-pdf", name: "OCR PDF", tagline: "Read scanned PDFs.", description: "Run browser OCR on scanned PDF pages and download text.", keywords: ["ocr pdf", "scanned pdf to text", "pdf ocr online", "read scanned pdf"], icon: ScanText, accentClass: "from-indigo-200 to-blue-200", status: "ready", category: "convert-from" },
+  { slug: "ocr-images", seoSlug: "ocr-images", name: "OCR Images", tagline: "Read text in images.", description: "Run browser OCR over one or more image files and download the extracted text.", keywords: ["ocr images", "image to text", "read image text"], icon: ScanText, accentClass: "from-indigo-200 to-blue-200", status: "ready", category: "convert-from" },
+  { slug: "pdf-to-long-image", seoSlug: "pdf-to-long-image", name: "PDF to Long Image", tagline: "Join PDF pages vertically.", description: "Render every page into one tall PNG image for easy sharing.", keywords: ["pdf to long image", "pdf to tall image", "combine pdf pages image"], icon: ImageDown, accentClass: "from-pink-200 to-rose-200", status: "ready", category: "convert-from" },
 ];
 
 export const CATEGORIES: { id: ToolCategory; label: string }[] = [

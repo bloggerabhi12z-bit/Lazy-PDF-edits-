@@ -13,6 +13,14 @@ import { MetadataTool } from "@/components/tools/MetadataTool";
 import { RepairTool } from "@/components/tools/RepairTool";
 import { FlattenTool } from "@/components/tools/FlattenTool";
 import {
+  DuplicatePagesTool,
+  MarkdownToPdfTool,
+  OcrImagesTool,
+  PdfToLongImageTool,
+  RemoveBlankPagesTool,
+  RemoveMetadataTool,
+} from "@/components/tools/StirlingTools";
+import {
   ComparePdfsTool,
   CropPdfTool,
   EditPdfTool,
@@ -49,12 +57,14 @@ export function renderTool(slug: string): ReactNode {
     case "extract-pages": return <ExtractPagesTool />;
     case "delete-pages": return <DeletePagesTool />;
     case "rearrange-pages": return <RearrangePagesTool />;
+    case "duplicate-pages": return <DuplicatePagesTool />;
     case "crop": return <CropPdfTool />;
     case "watermark": return <WatermarkTool />;
     case "remove-watermark": return <RemoveWatermarkTool />;
     case "page-numbers": return <PageNumbersTool />;
     case "header-footer": return <HeaderFooterTool />;
     case "metadata": return <MetadataTool />;
+    case "remove-metadata": return <RemoveMetadataTool />;
     case "edit": return <EditPdfTool />;
     case "redact": return <RedactPdfTool />;
     case "compare": return <ComparePdfsTool />;
@@ -64,16 +74,20 @@ export function renderTool(slug: string): ReactNode {
     case "fill-forms": return <FillFormsTool />;
     case "repair": return <RepairTool />;
     case "flatten": return <FlattenTool />;
+    case "remove-blank-pages": return <RemoveBlankPagesTool />;
     case "jpg-to-pdf":
       return <ImagesToPdfTool accept={{ "image/jpeg": [".jpg", ".jpeg"] }} hint="Drop JPG images. They'll be added in the order shown." />;
     case "png-to-pdf":
       return <ImagesToPdfTool accept={{ "image/png": [".png"] }} hint="Drop PNG images. They'll be added in the order shown." />;
     case "scan-to-pdf": return <ScanToPdfTool />;
+    case "markdown-to-pdf": return <MarkdownToPdfTool />;
     case "pdf-to-jpg": return <PdfToImagesTool type="jpg" />;
     case "pdf-to-png": return <PdfToImagesTool type="png" />;
     case "extract-images": return <ExtractImagesTool />;
     case "extract-text": return <ExtractTextTool />;
     case "ocr": return <OcrPdfTool />;
+    case "ocr-images": return <OcrImagesTool />;
+    case "pdf-to-long-image": return <PdfToLongImageTool />;
     case "word-to-pdf": return <WordToPdfTool />;
     case "excel-to-pdf": return <ExcelToPdfTool />;
     case "powerpoint-to-pdf": return <PowerPointToPdfTool />;
