@@ -40,12 +40,12 @@ export function DropZone({ onFiles, accept, multiple = true, hint, maxSize = DEF
   return (
     <div
       {...getRootProps()}
-      className={`group relative cursor-pointer overflow-hidden rounded-[2rem] border-2 border-dashed p-8 text-center outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:p-12 ${
+      className={`group relative cursor-pointer overflow-hidden rounded-2xl border-2 border-dashed bg-card p-8 text-center outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:p-14 ${
         isDragReject
           ? "border-destructive bg-destructive/5"
           : isDragActive
           ? "scale-[1.01] border-signal bg-signal-soft/70"
-          : "border-border bg-gradient-to-b from-card to-secondary/40 hover:scale-[1.005] hover:border-signal/70 hover:shadow-lg"
+          : "border-border hover:border-signal/70 hover:bg-signal-soft/20 hover:shadow-lg"
       }`}
       aria-label="Select files or drag and drop files here"
     >
@@ -67,16 +67,21 @@ export function DropZone({ onFiles, accept, multiple = true, hint, maxSize = DEF
       />
       <motion.div
         animate={{ y: isDragActive ? -6 : 0, scale: isDragActive ? 1.05 : 1 }}
-        className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-signal text-ink shadow-md shadow-signal/30 transition-transform group-hover:-translate-y-1"
+        className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-signal text-white shadow-md shadow-signal/20 transition-transform group-hover:-translate-y-1"
       >
         {isDragActive && !isDragReject ? <FileCheck2 className="h-8 w-8" /> : <UploadCloud className="h-8 w-8" />}
       </motion.div>
-      <div className="mt-5 font-display text-2xl">
+      <div className="mt-5 font-display text-2xl sm:text-3xl">
         {isDragReject ? "This file cannot be used" : isDragActive ? "Drop your files" : "Select files"}
       </div>
-      <p className="mt-1 text-sm text-muted-foreground">
+      <p className="mt-2 text-sm text-muted-foreground">
         {isDragActive ? "" : "or drag and drop here"}
       </p>
+      {!isDragActive && !isDragReject && (
+        <span className="mt-5 inline-flex h-11 items-center rounded-lg bg-signal px-6 text-sm font-semibold text-white shadow-sm transition group-hover:-translate-y-px">
+          Select files
+        </span>
+      )}
       <p className="mt-3 text-xs text-muted-foreground">
         {hint ?? `PDF and supported source files up to ${Math.round(maxSize / 1024 / 1024)} MB`}
       </p>

@@ -10,7 +10,7 @@ interface SingleFilePickerProps {
 
 export function SingleFilePicker({ file, onChange, children }: SingleFilePickerProps) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+    <div className="tool-surface p-5">
       <div className="flex items-center gap-4">
         <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-signal-soft text-signal">
           <FileText className="h-6 w-6" />
@@ -23,7 +23,7 @@ export function SingleFilePicker({ file, onChange, children }: SingleFilePickerP
           <X className="h-4 w-4" />
         </Button>
       </div>
-      {children && <div className="mt-4 border-t border-border/70 pt-4">{children}</div>}
+      {children && <div className="mt-5 border-t border-border/70 pt-5">{children}</div>}
     </div>
   );
 }

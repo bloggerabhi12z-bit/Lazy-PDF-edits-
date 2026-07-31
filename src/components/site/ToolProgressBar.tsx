@@ -18,7 +18,7 @@ interface ToolProgressBarProps {
 export function ToolProgressBar({ current, total, label }: ToolProgressBarProps) {
   const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+    <div className="tool-surface p-4">
       <div className="mb-2 flex items-center justify-between text-sm">
         <span className="font-medium text-foreground">{label}</span>
         <span className="text-muted-foreground">

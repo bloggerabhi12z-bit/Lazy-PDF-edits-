@@ -48,11 +48,11 @@
 :root {
   --radius: 0.875rem;
 
-  /* Warm paper background, deep ink foreground */
-  --paper: oklch(0.982 0.012 85);
-  --ink: oklch(0.22 0.035 265);
-  --signal: oklch(0.72 0.16 55);       /* warm amber */
-  --signal-soft: oklch(0.94 0.06 75);
+  /* Clean PDF workspace: white canvas, quiet gray surfaces, red action accent */
+  --paper: oklch(0.985 0.003 255);
+  --ink: oklch(0.22 0.018 255);
+  --signal: oklch(0.61 0.22 28);
+  --signal-soft: oklch(0.96 0.035 28);
 
   --background: var(--paper);
   --foreground: var(--ink);
@@ -62,7 +62,7 @@
   --popover-foreground: var(--ink);
   --primary: var(--ink);
   --primary-foreground: var(--paper);
-  --secondary: oklch(0.955 0.01 80);
+  --secondary: oklch(0.965 0.006 255);
   --secondary-foreground: var(--ink);
   --muted: oklch(0.955 0.01 80);
   --muted-foreground: oklch(0.45 0.02 260);
@@ -70,8 +70,8 @@
   --accent-foreground: var(--ink);
   --destructive: oklch(0.6 0.22 25);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.9 0.015 80);
-  --input: oklch(0.9 0.015 80);
+  --border: oklch(0.9 0.012 255);
+  --input: oklch(0.86 0.012 255);
   --ring: var(--signal);
 }
 
@@ -110,10 +110,7 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    background-image:
-      radial-gradient(1200px 600px at 85% -10%, color-mix(in oklab, var(--signal) 22%, transparent), transparent 60%),
-      radial-gradient(900px 500px at -10% 20%, color-mix(in oklab, var(--ink) 8%, transparent), transparent 60%);
-    background-attachment: fixed;
+    background-image: linear-gradient(to bottom, color-mix(in oklab, white 92%, var(--secondary)), var(--background) 22rem);
   }
   h1, h2, h3 {
     font-family: var(--font-display);
@@ -127,6 +124,15 @@
   border: 1px solid color-mix(in oklab, var(--ink) 8%, transparent);
   box-shadow: 0 1px 0 color-mix(in oklab, white 60%, transparent) inset,
               0 20px 40px -24px color-mix(in oklab, var(--ink) 30%, transparent);
+}
+
+@layer components {
+  .tool-surface {
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+    background: var(--color-card);
+    box-shadow: 0 12px 35px -28px color-mix(in oklab, var(--ink) 35%, transparent);
+  }
 }
 
 @utility ink-gradient-text {

@@ -28,18 +28,18 @@ export function ToolShell({
   return (
     <div className="min-h-screen">
       <Header />
-      <main id="top" className="mx-auto max-w-5xl px-6 py-10">
+      <main id="top" className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
         <Breadcrumbs items={[{ label: "PDF Tools", to: "/tools" }, { label: tool.name }]} />
 
-        <header className="mt-6 flex items-start gap-4">
+        <header className="mt-6 flex items-start gap-4 border-b border-border pb-7">
           <div
-            className={`grid h-14 w-14 flex-shrink-0 place-items-center rounded-2xl bg-gradient-to-br ${tool.accentClass}`}
+            className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-xl bg-signal-soft text-signal"
           >
             <tool.icon className="h-6 w-6 text-ink" />
           </div>
           <div className="min-w-0">
-            <h1 className="font-display text-4xl tracking-tight sm:text-5xl">{seo.h1}</h1>
-            <p className="mt-2 text-lg text-muted-foreground">{tool.description}</p>
+            <h1 className="font-display text-3xl tracking-tight sm:text-4xl">{seo.h1}</h1>
+            <p className="mt-2 max-w-2xl text-base text-muted-foreground">{tool.description}</p>
           </div>
         </header>
 
@@ -97,11 +97,11 @@ const toolTabs = [
 
 function ToolTabs({ activeSlug }: { activeSlug: string }) {
   const activeGroup = toolTabs.find((group) => group.tools.some(([slug]) => slug === activeSlug)) ?? toolTabs[0];
-  const [openGroup, setOpenGroup] = useState<string | null>(activeGroup.label);
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
 
   return (
-    <nav className="mt-8 rounded-2xl border border-border bg-card p-2 shadow-sm" aria-label="PDF tool navigation">
-      <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0">
+    <nav className="mt-6 border-b border-border" aria-label="PDF tool navigation">
+      <div className="flex gap-1 overflow-x-auto pb-1">
         {toolTabs.map((group) => {
           const active = group === activeGroup;
           const open = openGroup === group.label;
@@ -112,7 +112,7 @@ function ToolTabs({ activeSlug }: { activeSlug: string }) {
                 onClick={() => setOpenGroup(open ? null : group.label)}
                 aria-expanded={open}
                 className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                  active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  active ? "bg-signal-soft text-signal" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                 }`}
                 aria-label={`Show ${group.label} tools`}
               >

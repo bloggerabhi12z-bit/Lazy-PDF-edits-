@@ -42,7 +42,7 @@ export function Header() {
       <header className="sticky top-0 z-50 border-b border-border/70 bg-background/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="group flex items-center gap-2.5" aria-label="Lazy PDF home">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:-rotate-3"><FileStack className="h-5 w-5" /></span>
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-signal text-white shadow-sm transition-transform group-hover:-rotate-3"><FileStack className="h-5 w-5" /></span>
             <span className="font-display text-xl font-semibold tracking-tight">Lazy PDF</span>
           </Link>
           <nav className="hidden items-center gap-6 text-sm md:flex" aria-label="Primary navigation">
@@ -58,7 +58,7 @@ export function Header() {
                 <Button asChild variant="outline"><Link to="/dashboard"><LayoutDashboard className="mr-2 h-4 w-4" />Dashboard</Link></Button>
                 <Button variant="ghost" size="icon" onClick={() => void signOut()} aria-label="Sign out"><LogOut className="h-4 w-4" /></Button>
               </>
-            ) : <Button onClick={() => setAuthOpen(true)}><UserRound className="mr-2 h-4 w-4" />Sign in</Button>}
+            ) : <Button variant="action" onClick={() => setAuthOpen(true)}><UserRound className="mr-2 h-4 w-4" />Sign in</Button>}
           </div>
           <Button className="md:hidden" variant="ghost" size="icon" onClick={() => setMenuOpen(!menuOpen)} aria-label="Toggle navigation">{menuOpen ? <X /> : <Menu />}</Button>
         </div>
