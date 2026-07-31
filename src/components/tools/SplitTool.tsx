@@ -115,6 +115,8 @@ export function SplitTool() {
         <SingleFilePicker file={file} onChange={() => setFile(null)}>
           <div className="text-xs text-muted-foreground mb-4">{pageCount} pages</div>
 
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+
           {/* Range preview — mirrors iLovePDF's dashed "Range" box: shows the
               endpoints of the current selection, collapsing the middle with
               "..." once the range gets long, instead of always showing every page. */}
@@ -156,7 +158,7 @@ export function SplitTool() {
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 self-start rounded-2xl border border-border bg-secondary/35 p-4 sm:grid-cols-2 lg:col-start-2 lg:row-start-1 lg:grid-cols-1">
             <div>
               <Label htmlFor="from">From page</Label>
               <Input
@@ -187,6 +189,10 @@ export function SplitTool() {
                 className="mt-1"
               />
             </div>
+            <Button variant="action" size="xl" onClick={split} disabled={!file || busy} className="mt-2 w-full">
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Extract pages
+            </Button>
           </div>
 
           {thumbnails.length > 0 && (
@@ -194,7 +200,7 @@ export function SplitTool() {
               <div className="mb-2 mt-6 text-xs text-muted-foreground">
                 All pages · click one to start a range, click another to finish it
               </div>
-              <div className="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
+              <div className="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8 lg:col-start-1 lg:row-start-2">
                 {thumbnails.map((url, i) => {
                   const pageNumber = i + 1;
                   const inRange = pageNumber >= from && pageNumber <= to;
@@ -227,14 +233,9 @@ export function SplitTool() {
               </div>
             </>
           )}
+          </div>
         </SingleFilePicker>
       )}
-      <div className="flex justify-end">
-        <Button variant="action" size="xl" onClick={split} disabled={!file || busy}>
-          {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Extract pages
-        </Button>
-      </div>
     </div>
   );
 }

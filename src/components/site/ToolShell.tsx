@@ -1,4 +1,6 @@
 import { useEffect, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
+import { ChevronDown } from "lucide-react";
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
 import { ResultPreview } from "@/components/site/ResultPreview";
@@ -41,6 +43,8 @@ export function ToolShell({
           </div>
         </header>
 
+        <ToolTabs activeSlug={tool.slug} />
+
         <div className="mt-10">{children}</div>
 
         <ResultPreview />
@@ -49,5 +53,89 @@ export function ToolShell({
       </main>
       <Footer />
     </div>
+  );
+}
+
+const toolTabs = [
+  {
+    label: "Organize",
+    tools: [
+      ["merge", "Merge PDF"],
+      ["split", "Split PDF"],
+      ["extract-pages", "Extract pages"],
+      ["delete-pages", "Delete pages"],
+      ["rearrange-pages", "Rearrange"],
+    ],
+  },
+  {
+    label: "Edit",
+    tools: [
+      ["edit", "Edit PDF"],
+      ["watermark", "Watermark"],
+      ["page-numbers", "Page numbers"],
+      ["redact", "Redact"],
+    ],
+  },
+  {
+    label: "Convert",
+    tools: [
+      ["pdf-to-word", "PDF to Word"],
+      ["pdf-to-excel", "PDF to Excel"],
+      ["pdf-to-powerpoint", "PDF to PowerPoint"],
+      ["pdf-to-jpg", "PDF to JPG"],
+    ],
+  },
+  {
+    label: "Secure",
+    tools: [
+      ["protect", "Protect PDF"],
+      ["unlock", "Unlock PDF"],
+      ["sign", "Sign PDF"],
+    ],
+  },
+] as const;
+
+function ToolTabs({ activeSlug }: { activeSlug: string }) {
+  const activeGroup = toolTabs.find((group) => group.tools.some(([slug]) => slug === activeSlug)) ?? toolTabs[0];
+
+  return (
+    <nav className="mt-8 rounded-2xl border border-border bg-card p-2 shadow-sm" aria-label="PDF tool navigation">
+      <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0">
+        {toolTabs.map((group) => {
+          const active = group === activeGroup;
+          return (
+            <div key={group.label} className="group relative shrink-0">
+              <button
+                type="button"
+                className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                  active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
+                aria-label={`Show ${group.label} tools`}
+              >
+                {group.label}
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              <div className="invisible absolute left-0 top-full z-30 mt-2 min-w-48 translate-y-1 rounded-xl border border-border bg-card p-1.5 opacity-0 shadow-xl transition-all group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100">
+                {group.tools.map(([slug, label]) => (
+                  <Link
+                    key={slug}
+                    to="/tools/$slug"
+                    params={{ slug }}
+                    className={`block rounded-lg px-3 py-2 text-sm transition-colors ${
+                      slug === activeSlug ? "bg-secondary font-semibold text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <Link to="/tools" className="ml-auto shrink-0 rounded-xl px-3.5 py-2.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground">
+          All tools
+        </Link>
+      </div>
+    </nav>
   );
 }
