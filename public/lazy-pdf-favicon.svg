@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title>Lazy PDF</title>
+  <rect width="256" height="256" rx="42" fill="#fff"/>
+  <path fill="#9b633f" stroke="#3b2115" stroke-width="6" d="M61 123C38 95 43 52 77 32c31-19 67-8 83 22 28-6 55 11 63 39 9 31-10 62-39 73l-3 45H75l-4-45c-14-5-23-13-31-24-13-18-11-38 21-19Z"/>
+  <path fill="#f6ead2" d="M75 79c5-24 22-36 45-35 24 2 39 17 43 39-13-11-26-15-43-15-18 0-31 4-45 11Z"/>
+  <ellipse cx="87" cy="96" rx="24" ry="29" fill="#4c2918"/>
+  <ellipse cx="151" cy="96" rx="24" ry="29" fill="#4c2918"/>
+  <path fill="none" stroke="#17100d" stroke-linecap="round" stroke-width="7" d="M76 99c6 6 13 6 19 0m45 0c6 6 13 6 19 0M111 119c8 8 17 8 25 0"/>
+  <ellipse cx="123" cy="114" rx="12" ry="9" fill="#17100d"/>
+  <path fill="#fff" stroke="#7b2e1e" stroke-width="6" d="M75 119h121v99H75z"/>
+  <path fill="#ef2b2d" d="M156 119h40l-40 40zM75 181h121v37H75z"/>
+  <path fill="#cbd1d8" d="M93 143h59v8H93zm0 22h72v8H93z"/>
+  <text x="91" y="207" fill="#fff" font-family="Arial,sans-serif" font-size="24" font-weight="700">PDF</text>
+</svg>
