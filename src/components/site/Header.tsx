@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { FileStack, LayoutDashboard, LogOut, Menu, Moon, Sun, UserRound, X } from "lucide-react";
+import { LayoutDashboard, LogOut, Menu, Moon, Sun, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { AuthDialog } from "@/components/site/AuthDialog";
 import { useAuth } from "@/components/site/AuthProvider";
@@ -42,8 +42,7 @@ export function Header() {
       <header className="sticky top-0 z-50 border-b border-border/70 bg-background/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="group flex items-center gap-2.5" aria-label="Lazy PDF home">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-signal text-white shadow-sm transition-transform group-hover:-rotate-3"><FileStack className="h-5 w-5" /></span>
-            <span className="font-display text-xl font-semibold tracking-tight">Lazy PDF</span>
+            <img src="/lazy-pdf-logo.svg" alt="Lazy PDF" className="h-10 w-auto max-w-[190px] object-contain object-left" />
           </Link>
           <nav className="hidden items-center gap-6 text-sm md:flex" aria-label="Primary navigation">
             <Link to="/tools" className="text-muted-foreground transition hover:text-foreground">All tools</Link>
