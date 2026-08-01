@@ -42,7 +42,7 @@ export function Header() {
       <header className="sticky top-0 z-50 border-b border-border/70 bg-background/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="group flex items-center gap-2.5" aria-label="Lazy PDF home">
-            <span className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-white/70 bg-white shadow-sm transition-transform group-hover:-rotate-2 dark:border-white/10">
+            <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-signal/25 bg-signal-soft p-0.5 shadow-[0_4px_12px_-6px_var(--signal)] transition-transform group-hover:-rotate-2 dark:border-white/10 dark:bg-white/5 dark:shadow-none">
               <img src="/lazy-pdf-favicon.svg" alt="" className="h-full w-full object-cover" />
             </span>
             <span className="font-display text-xl font-semibold tracking-tight text-foreground">
