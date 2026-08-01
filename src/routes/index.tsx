@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, Check, Gauge, Layers3, LockKeyhole, MonitorSmartphone, ShieldCheck, Sparkles, WandSparkles, Zap } from "lucide-react";
+import { ArrowRight, Check, Gauge, Layers3, LockKeyhole, MonitorSmartphone, Search, ShieldCheck, Sparkles, WandSparkles, Zap } from "lucide-react";
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
 import { HomeUpload } from "@/components/site/HomeUpload";
 import { TOOLS } from "@/lib/tools-registry";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "Lazy PDF — Private, fast PDF tools" }, { name: "description", content: "Edit, convert, organize, compress, sign, and protect PDFs in your browser with a polished private toolkit." }, { property: "og:title", content: "Lazy PDF — Private, fast PDF tools" }, { property: "og:description", content: "A complete PDF workspace that keeps documents on your device." }] }),
@@ -22,7 +24,11 @@ const faqs = [
 ];
 
 function LandingPage() {
+  const [toolQuery, setToolQuery] = useState("");
   const popular = popularSlugs.map((slug) => TOOLS.find((tool) => tool.slug === slug)).filter(Boolean) as typeof TOOLS;
+  const matchingTools = toolQuery.trim()
+    ? TOOLS.filter((tool) => `${tool.name} ${tool.tagline} ${tool.keywords.join(" ")}`.toLowerCase().includes(toolQuery.toLowerCase())).slice(0, 5)
+    : [];
   return <div className="min-h-screen"><Header />
     <main>
       <section className="relative overflow-hidden px-4 pb-16 pt-16 sm:px-6 sm:pt-24"><div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_20%,color-mix(in_oklab,var(--signal)_18%,transparent),transparent_30%)]" /><div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[1fr_0.88fr]">
@@ -31,6 +37,22 @@ function LandingPage() {
       </div></section>
 
       <section className="border-y border-border bg-card/45 px-4 py-6 sm:px-6"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-8 gap-y-3 text-xs font-semibold uppercase tracking-[.18em] text-muted-foreground"><span>Supported formats</span>{["PDF", "DOCX", "XLSX", "PPTX", "JPG", "PNG", "HTML", "EPUB"].map((format) => <span key={format} className="text-foreground">{format}</span>)}</div></section>
+
+      <section className="mx-auto max-w-3xl px-4 pt-14 sm:px-6">
+        <div className="text-center">
+          <div className="text-xs font-semibold uppercase tracking-[.2em] text-signal">Find a tool</div>
+          <h2 className="mt-2 font-display text-3xl sm:text-4xl">What do you want to do?</h2>
+        </div>
+        <div className="relative mt-6">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+          <Input value={toolQuery} onChange={(event) => setToolQuery(event.target.value)} placeholder="Search merge, compress, convert..." aria-label="Search PDF tools" className="h-14 rounded-full bg-card pl-12 pr-5 text-base shadow-sm" />
+        </div>
+        {matchingTools.length > 0 && (
+          <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-card shadow-lg">
+            {matchingTools.map((tool) => <Link key={tool.slug} to="/$slug" params={{ slug: tool.seoSlug }} className="flex items-center justify-between border-b border-border px-5 py-3 last:border-0 hover:bg-secondary"><span><strong className="font-medium">{tool.name}</strong><span className="ml-2 text-sm text-muted-foreground">{tool.tagline}</span></span><ArrowRight className="h-4 w-4 text-signal" /></Link>)}
+          </div>
+        )}
+      </section>
 
       <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6"><div className="flex items-end justify-between gap-4"><div><div className="text-xs font-semibold uppercase tracking-[.2em] text-signal">Popular tools</div><h2 className="mt-2 font-display text-4xl sm:text-5xl">Start with what you need.</h2></div><Link to="/tools" className="hidden items-center text-sm font-medium sm:inline-flex">View all <ArrowRight className="ml-2 h-4 w-4" /></Link></div><div className="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{popular.map((tool) => <Link key={tool.slug} to="/tools/$slug" params={{ slug: tool.slug }} className="group rounded-[1.5rem] border border-border bg-card p-6 shadow-sm transition hover:-translate-y-1 hover:border-signal hover:shadow-xl hover:shadow-ink/5"><div className={`grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br ${tool.accentClass}`}><tool.icon className="h-5 w-5 text-ink" /></div><h3 className="mt-5 font-display text-xl">{tool.name}</h3><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{tool.tagline}</p><span className="mt-5 inline-flex items-center text-sm font-medium text-signal">Open tool <ArrowRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" /></span></Link>)}</div></section>
 
