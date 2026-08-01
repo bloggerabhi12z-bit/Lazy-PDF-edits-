@@ -53,7 +53,12 @@ export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       return;
     }
     try {
-      const { error } = await supabase.auth.signInWithOAuth({ provider });
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
       if (error) throw error;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "OAuth sign-in failed.");
