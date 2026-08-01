@@ -6,6 +6,7 @@ import PptxGenJS from "pptxgenjs";
 import { Document, ImageRun, Packer, Paragraph } from "docx";
 import { createWorker } from "tesseract.js";
 import { DropZone } from "@/components/site/DropZone";
+import { PdfEditor, type EditorApplyState } from "@/components/site/PdfEditor";
 import { ToolProgressBar } from "@/components/site/ToolProgressBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -394,15 +395,17 @@ export function EditPdfTool() {
   const [x, setX] = useState(72);
   const [y, setY] = useState(72);
   const [busy, setBusy] = useState(false);
-  async function run() {
+  async function apply(state: EditorApplyState) {
     if (!file) return;
     setBusy(true);
     try {
       const doc = await PDFDocument.load(new Uint8Array(await file.arrayBuffer()));
       const font = await doc.embedFont(StandardFonts.HelveticaBold);
-      doc.getPages()[0]?.drawText(text, { x, y, size: 18, font, color: rgb(0.1, 0.32, 0.45) });
-      downloadBlob(await doc.save(), `lazy-pdf-edited-${file.name}`);
+      const page = doc.getPages()[state.pages[0]?.originalIndex ?? 0];
+      page?.drawText(text, { x, y, size: 18, font, color: rgb(0.1, 0.32, 0.45) });
+      const bytes = await doc.save();
       toast.success("PDF edited.");
+      return { blob: new Blob([bytes as BlobPart], { type: "application/pdf" }), filename: `lazy-pdf-edited-${file.name}` };
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Edit failed.");
     } finally {
@@ -411,49 +414,14 @@ export function EditPdfTool() {
   }
   return (
     <div className="space-y-6">
-      <SinglePdfPicker
-        file={file}
-        onFile={setFile}
-        hint="Drop a PDF, then add text to the first page."
-      />
-      {file && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="sm:col-span-3">
-            <Label htmlFor="edit-text">Text</Label>
-            <Input
-              id="edit-text"
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <Label htmlFor="edit-x">X</Label>
-            <Input
-              id="edit-x"
-              type="number"
-              value={x}
-              onChange={(event) => setX(Number(event.target.value))}
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <Label htmlFor="edit-y">Y</Label>
-            <Input
-              id="edit-y"
-              type="number"
-              value={y}
-              onChange={(event) => setY(Number(event.target.value))}
-              className="mt-1"
-            />
-          </div>
+      {!file ? <DropZone onFiles={(files) => setFile(files[0] ?? null)} accept={{ "application/pdf": [".pdf"] }} multiple={false} hint="Drop a PDF to open the full editor workspace." /> : <>
+        <div className="grid gap-4 rounded-2xl border border-border bg-card p-5 sm:grid-cols-3">
+          <div className="sm:col-span-3"><Label htmlFor="edit-text">Text to add</Label><Input id="edit-text" value={text} onChange={(event) => setText(event.target.value)} className="mt-1" /></div>
+          <div><Label htmlFor="edit-x">Horizontal position</Label><Input id="edit-x" type="number" value={x} onChange={(event) => setX(Number(event.target.value))} className="mt-1" /></div>
+          <div><Label htmlFor="edit-y">Vertical position</Label><Input id="edit-y" type="number" value={y} onChange={(event) => setY(Number(event.target.value))} className="mt-1" /></div>
         </div>
-      )}
-      <div className="flex justify-end">
-        <Button variant="action" size="xl" onClick={run} disabled={!file || busy || !text}>
-          {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Apply edit
-        </Button>
-      </div>
+        <PdfEditor file={file} mode="select" actionLabel="Save changes" busy={busy} selectionHint="Use the workspace to review pages, zoom, rotate, duplicate, or select pages before saving." onReplace={() => setFile(null)} onApply={apply} />
+      </>}
     </div>
   );
 }
