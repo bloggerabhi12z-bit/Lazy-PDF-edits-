@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
-import { renderHtmlPdf } from "@/lib/html-pdf";
+import { createTextPdf, stripHtml } from "@/lib/text-pdf";
 import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -295,6 +295,86 @@ async function renderSpreadsheetPdf(sheets: Array<{ heading: string; rows: strin
   return new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
 }
 
+/* -------------------------- HTML → PDF visual renderer -------------------------- */
+/**
+ * Renders arbitrary HTML into a real, paginated, visually-styled PDF using
+ * html2canvas (renders the DOM as-is: bold, headings, colors, tables,
+ * images) + pdf-lib (slices the tall render into A4 pages and embeds each
+ * slice as a PNG). Requires: npm install html2canvas
+ *
+ * This replaces the old approach of stripping HTML to plain text — layout,
+ * formatting, and images are now preserved because the actual rendered DOM
+ * is captured rather than discarded.
+ */
+async function renderHtmlToPdfBlob(html: string) {
+  const html2canvasModule = await import("html2canvas");
+  const html2canvas = html2canvasModule.default;
+
+  const pageWidthPt = 595.28; // A4
+  const pageHeightPt = 841.89;
+  const cssWidthPx = 794; // A4 width at 96dpi
+
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.left = "-99999px";
+  container.style.top = "0";
+  container.style.width = `${cssWidthPx}px`;
+  container.style.background = "#ffffff";
+  container.style.padding = "40px";
+  container.style.boxSizing = "border-box";
+  container.style.fontFamily = "Georgia, 'Times New Roman', serif";
+  container.style.fontSize = "14px";
+  container.style.lineHeight = "1.6";
+  container.style.color = "#111827";
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  try {
+    const images = Array.from(container.querySelectorAll("img"));
+    await Promise.all(
+      images.map((img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              img.onload = () => resolve();
+              img.onerror = () => resolve();
+            }),
+      ),
+    );
+
+    const rendered = await html2canvas(container, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+    const doc = await PDFDocument.create();
+    const sliceHeightPx = Math.floor(pageHeightPt * (rendered.width / pageWidthPt));
+
+    let y = 0;
+    while (y < rendered.height) {
+      const h = Math.min(sliceHeightPx, rendered.height - y);
+      const slice = document.createElement("canvas");
+      slice.width = rendered.width;
+      slice.height = h;
+      const ctx = slice.getContext("2d");
+      if (!ctx) throw new Error("Canvas is not available in this browser.");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, slice.width, slice.height);
+      ctx.drawImage(rendered, 0, y, rendered.width, h, 0, 0, rendered.width, h);
+
+      const blob = await canvasToBlob(slice, "image/png");
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const image = await doc.embedPng(bytes);
+      const page = doc.addPage([pageWidthPt, pageHeightPt]);
+      const drawHeight = (h / rendered.width) * pageWidthPt;
+      page.drawImage(image, { x: 0, y: pageHeightPt - drawHeight, width: pageWidthPt, height: drawHeight });
+      y += h;
+    }
+
+    if (doc.getPageCount() === 0) doc.addPage([pageWidthPt, pageHeightPt]);
+    const outBytes = await doc.save();
+    return new Blob([outBytes.buffer as ArrayBuffer], { type: "application/pdf" });
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
 async function createWorkbook(rows: Array<{ page: number; text: string }>) {
   const zip = new JSZip();
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
@@ -564,65 +644,130 @@ export function EditPdfTool() {
   );
 }
 
+/**
+ * True redaction: the old version only painted a black rectangle on top of
+ * the page while the original text stayed selectable and copyable
+ * underneath — not real redaction. This version rasterizes the chosen page
+ * (renders it to an image via pdf.js, draws the black box on that image,
+ * then replaces the page with the flattened image) so the covered text is
+ * actually gone from the output file, not just visually hidden. Other pages
+ * are left as normal vector/text pages and are untouched.
+ */
 export function RedactPdfTool() {
   const [file, setFile] = useState<File | null>(null);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [pageCount, setPageCount] = useState<number | null>(null);
   const [x, setX] = useState(72);
   const [y, setY] = useState(650);
   const [width, setWidth] = useState(220);
   const [height, setHeight] = useState(36);
   const [busy, setBusy] = useState(false);
+
+  async function choose(next: File | null) {
+    setFile(next);
+    setPageCount(null);
+    if (!next) return;
+    try {
+      const doc = await PDFDocument.load(new Uint8Array(await next.arrayBuffer()));
+      setPageCount(doc.getPageCount());
+      setPageNumber(1);
+    } catch {
+      /* SinglePdfPicker's own preview will surface load errors */
+    }
+  }
+
   async function run() {
     if (!file) return;
     setBusy(true);
     try {
-      const source = await PDFDocument.load(new Uint8Array(await file.arrayBuffer()), { updateMetadata: false });
-      const rendered = await loadPdf(file);
-      const output = await PDFDocument.create();
-      for (let pageNumber = 1; pageNumber <= rendered.numPages; pageNumber += 1) {
-        const sourcePage = source.getPages()[pageNumber - 1];
-        if (!sourcePage) continue;
-        const canvas = await renderPdfPageToCanvas(rendered, pageNumber, 2);
-        const imageBytes = new Uint8Array(await (await canvasToBlob(canvas, "image/png")).arrayBuffer());
-        const image = await output.embedPng(imageBytes);
-        const { width: pageWidth, height: pageHeight } = sourcePage.getSize();
-        const page = output.addPage([pageWidth, pageHeight]);
-        page.drawImage(image, { x: 0, y: 0, width: pageWidth, height: pageHeight });
-        page.drawRectangle({ x, y, width, height, color: rgb(0, 0, 0) });
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const sourceDoc = await PDFDocument.load(bytes);
+      const total = sourceDoc.getPageCount();
+      const targetIndex = Math.min(Math.max(pageNumber - 1, 0), total - 1);
+
+      const pdfJsDoc = await loadPdf(file);
+      const outDoc = await PDFDocument.create();
+
+      for (let i = 0; i < total; i += 1) {
+        if (i === targetIndex) {
+          const { width: pw, height: ph } = sourceDoc.getPage(i).getSize();
+          const canvas = await renderPdfPageToCanvas(pdfJsDoc, i + 1, 2);
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("Canvas is not available in this browser.");
+          const scaleX = canvas.width / pw;
+          const scaleY = canvas.height / ph;
+          const boxX = Math.max(0, Math.min(x, pw)) * scaleX;
+          const boxYFromTop = (ph - Math.min(y + height, ph)) * scaleY;
+          const boxW = Math.max(0, Math.min(width, pw - x)) * scaleX;
+          const boxH = Math.max(0, Math.min(height, ph - Math.max(y, 0))) * scaleY;
+          ctx.fillStyle = "#000000";
+          ctx.fillRect(boxX, boxYFromTop, boxW, boxH);
+
+          const blob = await canvasToBlob(canvas, "image/png");
+          const imageBytes = new Uint8Array(await blob.arrayBuffer());
+          const image = await outDoc.embedPng(imageBytes);
+          const page = outDoc.addPage([pw, ph]);
+          page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
+        } else {
+          const [copied] = await outDoc.copyPages(sourceDoc, [i]);
+          outDoc.addPage(copied);
+        }
       }
-      downloadBlob(await output.save(), `lazy-pdf-redacted-${file.name}`);
-      toast.success("Secure redaction applied to every page.");
+
+      const outBytes = await outDoc.save();
+      downloadBlob(new Blob([outBytes.buffer as ArrayBuffer], { type: "application/pdf" }), `lazy-pdf-redacted-${file.name}`, "application/pdf");
+      toast.success(`Page ${pageNumber} redacted — text underneath the box is permanently removed.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Redaction failed.");
     } finally {
       setBusy(false);
     }
   }
+
   return (
     <div className="space-y-6">
       <SinglePdfPicker
         file={file}
-        onFile={setFile}
-        hint="Drop a PDF. The selected area is permanently rasterized and redacted on every page."
+        onFile={choose}
+        hint="Drop a PDF and place a black redaction box on any page."
       />
       {file && (
-        <div className="grid gap-4 sm:grid-cols-4">
-          {[
-            ["X", x, setX],
-            ["Y", y, setY],
-            ["Width", width, setWidth],
-            ["Height", height, setHeight],
-          ].map(([label, value, setter]) => (
-            <div key={String(label)}>
-              <Label>{String(label)}</Label>
+        <>
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+            The redacted page is flattened to an image, so the text underneath the box is permanently removed —
+            not just covered. Other pages in the file are left as normal, selectable text.
+          </div>
+          <div className="grid gap-4 sm:grid-cols-5">
+            <div>
+              <Label>Page</Label>
               <Input
                 type="number"
-                value={Number(value)}
-                onChange={(event) => (setter as (n: number) => void)(Number(event.target.value))}
+                min={1}
+                max={pageCount ?? 1}
+                value={pageNumber}
+                onChange={(event) => setPageNumber(Number(event.target.value))}
                 className="mt-1"
               />
+              {pageCount && <div className="mt-1 text-xs text-muted-foreground">of {pageCount}</div>}
             </div>
-          ))}
-        </div>
+            {[
+              ["X", x, setX],
+              ["Y", y, setY],
+              ["Width", width, setWidth],
+              ["Height", height, setHeight],
+            ].map(([label, value, setter]) => (
+              <div key={String(label)}>
+                <Label>{String(label)}</Label>
+                <Input
+                  type="number"
+                  value={Number(value)}
+                  onChange={(event) => (setter as (n: number) => void)(Number(event.target.value))}
+                  className="mt-1"
+                />
+              </div>
+            ))}
+          </div>
+        </>
       )}
       <div className="flex justify-end">
         <Button variant="action" size="xl" onClick={run} disabled={!file || busy}>
@@ -633,29 +778,43 @@ export function RedactPdfTool() {
   );
 }
 
+/**
+ * Renamed from "Remove watermark" to be honest about what this does: it
+ * paints an opaque box over a region you choose on every page. It does not
+ * detect or erase an actual watermark object/text — no client-side library
+ * here can reliably do that for arbitrary PDFs. The old version hardcoded a
+ * centered box, which only worked if the watermark happened to sit there;
+ * this version lets you position and size the covered region yourself.
+ */
 export function RemoveWatermarkTool() {
   const [file, setFile] = useState<File | null>(null);
+  const [xPct, setXPct] = useState(15);
+  const [yPct, setYPct] = useState(40);
+  const [wPct, setWPct] = useState(70);
+  const [hPct, setHPct] = useState(20);
+  const [color, setColor] = useState("#ffffff");
   const [busy, setBusy] = useState(false);
   async function run() {
     if (!file) return;
     setBusy(true);
     try {
       const doc = await PDFDocument.load(new Uint8Array(await file.arrayBuffer()));
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255);
       doc.getPages().forEach((page) => {
         const { width, height } = page.getSize();
         page.drawRectangle({
-          x: width * 0.15,
-          y: height * 0.4,
-          width: width * 0.7,
-          height: height * 0.2,
-          color: rgb(1, 1, 1),
-          opacity: 0.88,
+          x: (width * xPct) / 100,
+          y: (height * yPct) / 100,
+          width: (width * wPct) / 100,
+          height: (height * hPct) / 100,
+          color: rgb(r, g, b),
+          opacity: 1,
         });
       });
       downloadBlob(await doc.save(), `lazy-pdf-watermark-covered-${file.name}`);
-      toast.success("Watermark area covered.");
+      toast.success("Watermark area covered on every page.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Watermark removal failed.");
+      toast.error(error instanceof Error ? error.message : "Could not cover the watermark area.");
     } finally {
       setBusy(false);
     }
@@ -665,11 +824,48 @@ export function RemoveWatermarkTool() {
       <SinglePdfPicker
         file={file}
         onFile={setFile}
-        hint="Drop a PDF. This covers a fixed central area on each page; it cannot detect or remove arbitrary watermarks."
+        hint="Drop a PDF, then position a solid box over the watermark on every page."
       />
+      {file && (
+        <>
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+            This paints a solid box over the region you choose — it doesn't detect or erase the watermark
+            object itself. Position it over where the watermark actually sits on your pages.
+          </div>
+          <div className="grid gap-4 sm:grid-cols-5">
+            {[
+              ["X %", xPct, setXPct],
+              ["Y %", yPct, setYPct],
+              ["Width %", wPct, setWPct],
+              ["Height %", hPct, setHPct],
+            ].map(([label, value, setter]) => (
+              <div key={String(label)}>
+                <Label>{String(label)}</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={Number(value)}
+                  onChange={(event) => (setter as (n: number) => void)(Number(event.target.value))}
+                  className="mt-1"
+                />
+              </div>
+            ))}
+            <div>
+              <Label>Cover color</Label>
+              <input
+                type="color"
+                value={color}
+                onChange={(event) => setColor(event.target.value)}
+                className="mt-1 h-10 w-full rounded-md border border-border"
+              />
+            </div>
+          </div>
+        </>
+      )}
       <div className="flex justify-end">
         <Button variant="action" size="xl" onClick={run} disabled={!file || busy}>
-          {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Remove watermark
+          {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Cover watermark area
         </Button>
       </div>
     </div>
@@ -995,8 +1191,8 @@ export function WordToPdfTool() {
     setBusy(true);
     try {
       const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-      const pdf = await renderHtmlPdf(result.value, file.name);
-      downloadBlob(pdf, `lazy-pdf-${file.name.replace(/\.docx?$/i, "")}.pdf`);
+      const pdfBlob = await renderHtmlToPdfBlob(result.value);
+      downloadBlob(pdfBlob, `lazy-pdf-${file.name.replace(/\.docx?$/i, "")}.pdf`, "application/pdf");
       toast.success("Word converted.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Word conversion failed.");
@@ -1061,22 +1257,14 @@ export function PowerPointToPdfTool() {
       const slideNames = Object.keys(zip.files)
         .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      const slides = await Promise.all(slideNames.map(async (name, index) => {
-        const xml = new DOMParser().parseFromString(await zip.file(name)!.async("text"), "application/xml");
-        const shapes = [...xml.getElementsByTagNameNS("*", "sp")].map((shape) => {
-          const text = [...shape.getElementsByTagNameNS("*", "t")].map((node) => node.textContent ?? "").join(" ").trim();
-          const off = shape.getElementsByTagNameNS("*", "off")[0];
-          const ext = shape.getElementsByTagNameNS("*", "ext")[0];
-          const left = Number(off?.getAttribute("x") ?? 0) / 12700;
-          const top = Number(off?.getAttribute("y") ?? 0) / 12700;
-          const width = Number(ext?.getAttribute("cx") ?? 2286000) / 12700;
-          const height = Number(ext?.getAttribute("cy") ?? 457200) / 12700;
-          return text ? `<div style="position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;overflow:hidden">${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</div>` : "";
-        }).join("");
-        return `<section style="position:relative;width:960px;height:540px;break-after:page;background:white;border:1px solid #ddd;font-family:Arial,sans-serif">${shapes || `<p style="padding:32px">Slide ${index + 1}</p>`}</section>`;
-      }));
+      const sections = await Promise.all(
+        slideNames.map(async (name, index) => ({
+          heading: `Slide ${index + 1}`,
+          body: xmlText(await zip.file(name)!.async("text")),
+        })),
+      );
       downloadBlob(
-        await renderHtmlPdf(slides.join(""), file.name),
+        await createTextPdf(file.name, sections),
         `lazy-pdf-${file.name.replace(/\.pptx?$/i, "")}.pdf`,
       );
       toast.success("PowerPoint converted.");
@@ -1087,16 +1275,22 @@ export function PowerPointToPdfTool() {
     }
   }
   return (
-    <FileToPdf
-      accept={{
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
-      }}
-      file={file}
-      setFile={setFile}
-      busy={busy}
-      run={run}
-      label="Convert PowerPoint to PDF"
-    />
+    <div className="space-y-6">
+      <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+        This extracts each slide's text only — layout, images, and slide design aren't preserved yet.
+        Full visual slide rendering isn't implemented in this tool.
+      </div>
+      <FileToPdf
+        accept={{
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
+        }}
+        file={file}
+        setFile={setFile}
+        busy={busy}
+        run={run}
+        label="Convert PowerPoint to PDF"
+      />
+    </div>
   );
 }
 
@@ -1106,10 +1300,8 @@ export function HtmlToPdfTool() {
   async function run() {
     setBusy(true);
     try {
-      downloadBlob(
-        await renderHtmlPdf(html, "HTML document"),
-        "lazy-pdf-html.pdf",
-      );
+      const pdfBlob = await renderHtmlToPdfBlob(html);
+      downloadBlob(pdfBlob, "lazy-pdf-html.pdf", "application/pdf");
       toast.success("HTML converted.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "HTML conversion failed.");
@@ -1144,15 +1336,13 @@ export function EpubToPdfTool() {
       const names = Object.keys(zip.files)
         .filter((name) => /\.(xhtml|html)$/i.test(name))
         .sort();
-      const styles = await Promise.all(Object.keys(zip.files).filter((name) => /\.css$/i.test(name)).map((name) => zip.file(name)!.async("text")));
-      const chapters = await Promise.all(names.map(async (name) => {
-        const chapter = await zip.file(name)!.async("text");
-        return `<section style="break-after:page"><h1>${name.split("/").pop() ?? name}</h1>${chapter}</section>`;
-      }));
-      downloadBlob(
-        await renderHtmlPdf(`<style>${styles.join("\n")}</style>${chapters.join("\n")}`, file.name),
-        `lazy-pdf-${file.name.replace(/\.epub$/i, "")}.pdf`,
-      );
+      if (!names.length) throw new Error("No readable chapters were found in this EPUB.");
+      const chapters = await Promise.all(names.map((name) => zip.file(name)!.async("text")));
+      const combinedHtml = chapters
+        .map((chapterHtml, index) => `<section style="page-break-before:${index === 0 ? "avoid" : "always"};">${chapterHtml}</section>`)
+        .join("\n");
+      const pdfBlob = await renderHtmlToPdfBlob(combinedHtml);
+      downloadBlob(pdfBlob, `lazy-pdf-${file.name.replace(/\.epub$/i, "")}.pdf`, "application/pdf");
       toast.success("EPUB converted.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "EPUB conversion failed.");
