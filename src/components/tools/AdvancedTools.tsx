@@ -157,6 +157,144 @@ async function readWorkbookSections(file: File) {
   }));
 }
 
+/* -------------------------- Excel → PDF table rendering -------------------------- */
+
+function colLetterToIndex(letter: string) {
+  let n = 0;
+  for (const ch of letter) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+async function readWorkbookGrid(file: File) {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const workbookXml = await zip.file("xl/workbook.xml")?.async("text");
+  if (!workbookXml) throw new Error("This workbook does not contain readable worksheets.");
+  const sheetNames = [...workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"/g)].map((m) => xmlText(m[1]));
+  const sharedXml = await zip.file("xl/sharedStrings.xml")?.async("text");
+  const sharedStrings = sharedXml
+    ? [...sharedXml.matchAll(/<si[^>]*>([\s\S]*?)<\/si>/g)].map((m) => xmlText(m[1]))
+    : [];
+  const worksheetPaths = Object.keys(zip.files)
+    .filter((p) => /^xl\/worksheets\/sheet\d+\.xml$/.test(p))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  return Promise.all(
+    worksheetPaths.map(async (path, index) => {
+      const xml = await zip.file(path)!.async("text");
+      const rowMatches = [...xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)];
+      const rows: string[][] = rowMatches.map((rowMatch) => {
+        const cellMatches = [...rowMatch[1].matchAll(/<c([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)];
+        const rowCells: string[] = [];
+        cellMatches.forEach((m) => {
+          const attrs = m[1];
+          const inner = m[2] ?? "";
+          const colMatch = /r="([A-Z]+)\d*"/.exec(attrs);
+          const colIdx = colMatch ? colLetterToIndex(colMatch[1]) : rowCells.length;
+          const t = /t="([a-z]+)"/.exec(attrs)?.[1];
+          const raw =
+            inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? inner.match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1] ?? "";
+          const value = t === "s" ? sharedStrings[Number(raw)] ?? "" : xmlText(raw);
+          while (rowCells.length < colIdx) rowCells.push("");
+          rowCells[colIdx] = value;
+        });
+        return rowCells;
+      });
+      const colCount = Math.max(1, ...rows.map((r) => r.length));
+      const padded = rows.map((r) => {
+        const copy = [...r];
+        while (copy.length < colCount) copy.push("");
+        return copy;
+      });
+      return { heading: sheetNames[index] ?? `Sheet ${index + 1}`, rows: padded };
+    }),
+  );
+}
+
+function truncateToWidth(
+  text: string,
+  maxWidth: number,
+  font: { widthOfTextAtSize: (t: string, s: number) => number },
+  size: number,
+) {
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && font.widthOfTextAtSize(`${t}…`, size) > maxWidth) t = t.slice(0, -1);
+  return `${t}…`;
+}
+
+async function renderSpreadsheetPdf(sheets: Array<{ heading: string; rows: string[][] }>) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const pageWidth = 841.89; // A4 landscape
+  const pageHeight = 595.28;
+  const margin = 36;
+  const fontSize = 8;
+  const rowHeight = 18;
+  const headerColor = rgb(0.09, 0.32, 0.26);
+  const headerTextColor = rgb(1, 1, 1);
+  const borderColor = rgb(0.85, 0.85, 0.85);
+  const textColor = rgb(0.1, 0.1, 0.1);
+  const zebraColor = rgb(0.96, 0.97, 0.96);
+  const MAX_COLS = 12;
+
+  for (const sheet of sheets) {
+    if (!sheet.rows.length) continue;
+    const colCount = Math.min(sheet.rows[0].length || 1, MAX_COLS);
+    const usableWidth = pageWidth - margin * 2;
+    const colWidth = usableWidth / colCount;
+
+    let page = doc.addPage([pageWidth, pageHeight]);
+    let cursorY = pageHeight - margin;
+
+    page.drawText(sheet.heading, { x: margin, y: cursorY, size: 14, font: boldFont, color: rgb(0.05, 0.05, 0.05) });
+    cursorY -= 26;
+
+    function drawRow(cells: string[], isHeader: boolean, zebra: boolean) {
+      if (isHeader) {
+        page.drawRectangle({ x: margin, y: cursorY - rowHeight, width: usableWidth, height: rowHeight, color: headerColor });
+      } else if (zebra) {
+        page.drawRectangle({ x: margin, y: cursorY - rowHeight, width: usableWidth, height: rowHeight, color: zebraColor });
+      }
+      for (let ci = 0; ci < colCount; ci++) {
+        page.drawRectangle({
+          x: margin + ci * colWidth,
+          y: cursorY - rowHeight,
+          width: colWidth,
+          height: rowHeight,
+          borderColor,
+          borderWidth: 0.5,
+        });
+      }
+      cells.slice(0, colCount).forEach((cell, ci) => {
+        const usedFont = isHeader ? boldFont : font;
+        page.drawText(truncateToWidth(cell ?? "", colWidth - 8, usedFont, fontSize), {
+          x: margin + ci * colWidth + 4,
+          y: cursorY - rowHeight + 5,
+          size: fontSize,
+          font: usedFont,
+          color: isHeader ? headerTextColor : textColor,
+        });
+      });
+      cursorY -= rowHeight;
+    }
+
+    drawRow(sheet.rows[0], true, false);
+    for (let ri = 1; ri < sheet.rows.length; ri++) {
+      if (cursorY - rowHeight < margin) {
+        page = doc.addPage([pageWidth, pageHeight]);
+        cursorY = pageHeight - margin;
+        drawRow(sheet.rows[0], true, false);
+      }
+      drawRow(sheet.rows[ri], false, ri % 2 === 0);
+    }
+  }
+
+  const bytes = await doc.save();
+  return new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
+}
+
 async function createWorkbook(rows: Array<{ page: number; text: string }>) {
   const zip = new JSZip();
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
@@ -877,11 +1015,9 @@ export function ExcelToPdfTool() {
     if (!file) return;
     setBusy(true);
     try {
-      const sections = await readWorkbookSections(file);
-      downloadBlob(
-        await createTextPdf(file.name, sections),
-        `lazy-pdf-${file.name.replace(/\.xlsx?$/i, "")}.pdf`,
-      );
+      const sheets = await readWorkbookGrid(file);
+      const pdfBlob = await renderSpreadsheetPdf(sheets);
+      downloadBlob(pdfBlob, `lazy-pdf-${file.name.replace(/\.xlsx?$/i, "")}.pdf`, "application/pdf");
       toast.success("Excel converted.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Excel conversion failed.");
@@ -1172,6 +1308,7 @@ function PdfTextExportTool({ type }: { type: "word" | "excel" }) {
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         );
       } else {
+        const pages = await extractPdfText(file);
         const rows = pages.flatMap((page, index) =>
           page
             .split(/\s{2,}|(?<=[.!?])\s+/)
@@ -1228,7 +1365,7 @@ function PdfTextExportTool({ type }: { type: "word" | "excel" }) {
           <div className="border-b border-border px-5 py-4 sm:px-6">
             <h2 className="font-display text-2xl">Text preview</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Review the extracted text before exporting it to {type === "word" ? "Word" : "Excel"}.
+              Review the extracted text before exporting it to Excel.
             </p>
           </div>
           <div className="max-h-[28rem] space-y-5 overflow-auto bg-secondary/35 p-4 sm:p-6">
