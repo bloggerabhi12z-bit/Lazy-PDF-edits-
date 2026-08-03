@@ -314,23 +314,51 @@ async function renderHtmlToPdfBlob(html: string) {
   const pageHeightPt = 841.89;
   const cssWidthPx = 794; // A4 width at 96dpi
 
-  const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.left = "-99999px";
-  container.style.top = "0";
-  container.style.width = `${cssWidthPx}px`;
-  container.style.background = "#ffffff";
-  container.style.padding = "40px";
-  container.style.boxSizing = "border-box";
-  container.style.fontFamily = "Georgia, 'Times New Roman', serif";
-  container.style.fontSize = "14px";
-  container.style.lineHeight = "1.6";
-  container.style.color = "#111827";
-  container.innerHTML = html;
-  document.body.appendChild(container);
+  // html2canvas can't parse modern CSS color functions like oklch()/
+  // color-mix(), which this site's Tailwind theme uses globally. Overriding
+  // individual CSS properties on an element appended to document.body isn't
+  // reliable — there are too many color-bearing properties (background-image
+  // gradients, outline-color, etc.) to cover one by one. Instead, render
+  // inside a same-origin iframe with its own blank document, so nothing from
+  // the host page's stylesheet — oklch or otherwise — is inherited at all.
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.left = "-99999px";
+  iframe.style.top = "0";
+  iframe.style.width = `${cssWidthPx}px`;
+  iframe.style.height = "50px";
+  iframe.style.border = "none";
+  document.body.appendChild(iframe);
 
   try {
-    const images = Array.from(container.querySelectorAll("img"));
+    const frameDoc = iframe.contentDocument;
+    if (!frameDoc) throw new Error("Could not prepare an isolated render surface for this document.");
+
+    frameDoc.open();
+    frameDoc.write(`<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  body {
+    width: ${cssWidthPx}px;
+    padding: 40px;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #111827;
+  }
+  h1, h2, h3, h4, h5, h6 { color: #0f172a; }
+  a { color: #1d4ed8; }
+  table { border-collapse: collapse; }
+  table, th, td { border: 1px solid #d1d5db; }
+  img { max-width: 100%; }
+</style></head><body>${html}</body></html>`);
+    frameDoc.close();
+
+    // Let layout settle before measuring/rendering.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const images = Array.from(frameDoc.images);
     await Promise.all(
       images.map((img) =>
         img.complete
@@ -342,7 +370,15 @@ async function renderHtmlToPdfBlob(html: string) {
       ),
     );
 
-    const rendered = await html2canvas(container, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+    const targetBody = frameDoc.body;
+    iframe.style.height = `${Math.max(50, targetBody.scrollHeight)}px`;
+
+    const rendered = await html2canvas(targetBody, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      windowWidth: cssWidthPx,
+    });
     const doc = await PDFDocument.create();
     const sliceHeightPx = Math.floor(pageHeightPt * (rendered.width / pageWidthPt));
 
@@ -371,9 +407,10 @@ async function renderHtmlToPdfBlob(html: string) {
     const outBytes = await doc.save();
     return new Blob([outBytes.buffer as ArrayBuffer], { type: "application/pdf" });
   } finally {
-    document.body.removeChild(container);
+    document.body.removeChild(iframe);
   }
 }
+
 
 async function createWorkbook(rows: Array<{ page: number; text: string }>) {
   const zip = new JSZip();
