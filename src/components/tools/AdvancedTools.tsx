@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
-import { createTextPdf, stripHtml } from "@/lib/text-pdf";
+import { renderHtmlPdf } from "@/lib/html-pdf";
 import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -575,10 +575,22 @@ export function RedactPdfTool() {
     if (!file) return;
     setBusy(true);
     try {
-      const doc = await PDFDocument.load(new Uint8Array(await file.arrayBuffer()));
-      doc.getPages()[0]?.drawRectangle({ x, y, width, height, color: rgb(0, 0, 0), opacity: 1 });
-      downloadBlob(await doc.save(), `lazy-pdf-redacted-${file.name}`);
-      toast.success("Redaction applied.");
+      const source = await PDFDocument.load(new Uint8Array(await file.arrayBuffer()), { updateMetadata: false });
+      const rendered = await loadPdf(file);
+      const output = await PDFDocument.create();
+      for (let pageNumber = 1; pageNumber <= rendered.numPages; pageNumber += 1) {
+        const sourcePage = source.getPages()[pageNumber - 1];
+        if (!sourcePage) continue;
+        const canvas = await renderPdfPageToCanvas(rendered, pageNumber, 2);
+        const imageBytes = new Uint8Array(await (await canvasToBlob(canvas, "image/png")).arrayBuffer());
+        const image = await output.embedPng(imageBytes);
+        const { width: pageWidth, height: pageHeight } = sourcePage.getSize();
+        const page = output.addPage([pageWidth, pageHeight]);
+        page.drawImage(image, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+        page.drawRectangle({ x, y, width, height, color: rgb(0, 0, 0) });
+      }
+      downloadBlob(await output.save(), `lazy-pdf-redacted-${file.name}`);
+      toast.success("Secure redaction applied to every page.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Redaction failed.");
     } finally {
@@ -590,7 +602,7 @@ export function RedactPdfTool() {
       <SinglePdfPicker
         file={file}
         onFile={setFile}
-        hint="Drop a PDF and place a black redaction box on the first page."
+        hint="Drop a PDF. The selected area is permanently rasterized and redacted on every page."
       />
       {file && (
         <div className="grid gap-4 sm:grid-cols-4">
@@ -653,7 +665,7 @@ export function RemoveWatermarkTool() {
       <SinglePdfPicker
         file={file}
         onFile={setFile}
-        hint="Drop a PDF. This covers the central watermark area on each page."
+        hint="Drop a PDF. This covers a fixed central area on each page; it cannot detect or remove arbitrary watermarks."
       />
       <div className="flex justify-end">
         <Button variant="action" size="xl" onClick={run} disabled={!file || busy}>
@@ -983,9 +995,7 @@ export function WordToPdfTool() {
     setBusy(true);
     try {
       const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-      const pdf = await createTextPdf(file.name, [
-        { heading: "Converted Word document", body: stripHtml(result.value) },
-      ]);
+      const pdf = await renderHtmlPdf(result.value, file.name);
       downloadBlob(pdf, `lazy-pdf-${file.name.replace(/\.docx?$/i, "")}.pdf`);
       toast.success("Word converted.");
     } catch (error) {
@@ -1051,14 +1061,22 @@ export function PowerPointToPdfTool() {
       const slideNames = Object.keys(zip.files)
         .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      const sections = await Promise.all(
-        slideNames.map(async (name, index) => ({
-          heading: `Slide ${index + 1}`,
-          body: xmlText(await zip.file(name)!.async("text")),
-        })),
-      );
+      const slides = await Promise.all(slideNames.map(async (name, index) => {
+        const xml = new DOMParser().parseFromString(await zip.file(name)!.async("text"), "application/xml");
+        const shapes = [...xml.getElementsByTagNameNS("*", "sp")].map((shape) => {
+          const text = [...shape.getElementsByTagNameNS("*", "t")].map((node) => node.textContent ?? "").join(" ").trim();
+          const off = shape.getElementsByTagNameNS("*", "off")[0];
+          const ext = shape.getElementsByTagNameNS("*", "ext")[0];
+          const left = Number(off?.getAttribute("x") ?? 0) / 12700;
+          const top = Number(off?.getAttribute("y") ?? 0) / 12700;
+          const width = Number(ext?.getAttribute("cx") ?? 2286000) / 12700;
+          const height = Number(ext?.getAttribute("cy") ?? 457200) / 12700;
+          return text ? `<div style="position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;overflow:hidden">${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</div>` : "";
+        }).join("");
+        return `<section style="position:relative;width:960px;height:540px;break-after:page;background:white;border:1px solid #ddd;font-family:Arial,sans-serif">${shapes || `<p style="padding:32px">Slide ${index + 1}</p>`}</section>`;
+      }));
       downloadBlob(
-        await createTextPdf(file.name, sections),
+        await renderHtmlPdf(slides.join(""), file.name),
         `lazy-pdf-${file.name.replace(/\.pptx?$/i, "")}.pdf`,
       );
       toast.success("PowerPoint converted.");
@@ -1089,7 +1107,7 @@ export function HtmlToPdfTool() {
     setBusy(true);
     try {
       downloadBlob(
-        await createTextPdf("HTML to PDF", [{ heading: "HTML document", body: stripHtml(html) }]),
+        await renderHtmlPdf(html, "HTML document"),
         "lazy-pdf-html.pdf",
       );
       toast.success("HTML converted.");
@@ -1126,14 +1144,13 @@ export function EpubToPdfTool() {
       const names = Object.keys(zip.files)
         .filter((name) => /\.(xhtml|html)$/i.test(name))
         .sort();
-      const sections = await Promise.all(
-        names.map(async (name) => ({
-          heading: name.split("/").pop() ?? name,
-          body: stripHtml(await zip.file(name)!.async("text")),
-        })),
-      );
+      const styles = await Promise.all(Object.keys(zip.files).filter((name) => /\.css$/i.test(name)).map((name) => zip.file(name)!.async("text")));
+      const chapters = await Promise.all(names.map(async (name) => {
+        const chapter = await zip.file(name)!.async("text");
+        return `<section style="break-after:page"><h1>${name.split("/").pop() ?? name}</h1>${chapter}</section>`;
+      }));
       downloadBlob(
-        await createTextPdf(file.name, sections),
+        await renderHtmlPdf(`<style>${styles.join("\n")}</style>${chapters.join("\n")}`, file.name),
         `lazy-pdf-${file.name.replace(/\.epub$/i, "")}.pdf`,
       );
       toast.success("EPUB converted.");
