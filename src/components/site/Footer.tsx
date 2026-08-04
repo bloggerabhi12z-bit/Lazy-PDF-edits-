@@ -1,145 +1,53 @@
 import { Link } from "@tanstack/react-router";
-import { TOOLS, CATEGORIES, getPopularTools } from "@/lib/tools-registry";
-import { POSTS } from "@/lib/blog-data";
+
+const toolGroups = [
+  { title: "Organize", links: [{ label: "Merge PDF", href: "/merge-pdf" }, { label: "Split PDF", href: "/split-pdf" }, { label: "Extract pages", href: "/extract-pages" }, { label: "Rotate PDF", href: "/rotate-pdf" }] },
+  { title: "Optimize", links: [{ label: "Compress PDF", href: "/compress-pdf" }, { label: "Repair PDF", href: "/repair-pdf" }, { label: "Flatten PDF", href: "/flatten-pdf" }] },
+  { title: "Edit", links: [{ label: "Edit PDF", href: "/edit-pdf" }, { label: "Add watermark", href: "/watermark-pdf" }, { label: "Page numbers", href: "/add-page-numbers" }] },
+  { title: "Security", links: [{ label: "Protect PDF", href: "/protect-pdf" }, { label: "Unlock PDF", href: "/unlock-pdf" }, { label: "Sign PDF", href: "/sign-pdf" }] },
+  { title: "Convert to", links: [{ label: "JPG to PDF", href: "/jpg-to-pdf" }, { label: "Word to PDF", href: "/word-to-pdf" }, { label: "HTML to PDF", href: "/html-to-pdf" }] },
+  { title: "Convert from", links: [{ label: "PDF to JPG", href: "/pdf-to-jpg" }, { label: "PDF to Word", href: "/pdf-to-word" }, { label: "PDF to Excel", href: "/pdf-to-excel" }] },
+];
+
+const companyLinks = [{ label: "About us", to: "/about" }, { label: "Contact us", to: "/contact" }, { label: "Blog", to: "/blog" }, { label: "Press", to: "/press" }];
+const legalLinks = [{ label: "Security", to: "/security" }, { label: "Privacy policy", to: "/privacy-policy" }, { label: "Terms", to: "/terms-and-conditions" }, { label: "Cookies", to: "/cookies" }];
 
 export function Footer() {
-  const popular = getPopularTools();
-  const latestPosts = [...POSTS]
-    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
-    .slice(0, 4);
-  const cols = CATEGORIES.map((c) => ({
-    label: c.label,
-    tools: TOOLS.filter((t) => t.category === c.id),
-  }));
-
   return (
-    <footer className="mt-24 border-t border-border/60 bg-background/50">
-      <div className="mx-auto max-w-7xl px-6 py-14">
-        {/* Top: brand + quick nav */}
-        <div className="grid gap-10 md:grid-cols-4">
-          <div className="md:col-span-1">
-            <div className="font-display text-lg font-semibold">Lazy PDF</div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              A calmer way to work with PDFs. Everything runs in your browser — nothing uploaded.
-            </p>
-            <div className="mt-4 text-xs text-muted-foreground">
-              🔒 100% private, in-browser processing
-            </div>
+    <footer className="mt-16 border-t border-border bg-secondary/35">
+      <div className="mx-auto max-w-7xl px-6 py-10 sm:py-12">
+        <Link to="/" className="inline-flex items-center gap-3" aria-label="Lazy PDF home">
+          <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-signal/25 bg-signal-soft p-0.5 shadow-sm dark:border-white/20 dark:bg-white">
+            <img src="/lazy-pdf-favicon.svg" alt="" className="h-full w-full object-cover" />
+          </span>
+          <span className="font-display text-2xl font-semibold tracking-tight text-foreground">Lazy <span className="text-signal">PDF</span></span>
+        </Link>
+
+        <section className="mt-9" aria-labelledby="footer-tools-title">
+          <h2 id="footer-tools-title" className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">All tools</h2>
+          <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-8 sm:grid-cols-3 lg:grid-cols-6">
+            {toolGroups.map((group) => <ToolGroup key={group.title} {...group} />)}
           </div>
+        </section>
 
-          <FooterCol title="Popular tools">
-            {popular.map((t) => (
-              <FooterLink key={t.slug} to="/$slug" params={{ slug: t.seoSlug }}>
-                {t.name}
-              </FooterLink>
-            ))}
-          </FooterCol>
-
-          <FooterCol title="Latest from the blog">
-            {latestPosts.map((p) => (
-              <FooterLink key={p.slug} to="/blog/$slug" params={{ slug: p.slug }}>
-                {p.title}
-              </FooterLink>
-            ))}
-            <li className="pt-1">
-              <Link to="/blog" className="text-signal hover:underline">
-                All articles →
-              </Link>
-            </li>
-          </FooterCol>
-
-          <FooterCol title="Company">
-            <FooterLink to="/tools">All tools</FooterLink>
-            <FooterLink to="/blog">Blog</FooterLink>
-            <li>
-              <a href="/#how" className="hover:text-signal">
-                How it works
-              </a>
-            </li>
-            <li>
-              <a href="/#faq" className="hover:text-signal">
-                FAQ
-              </a>
-            </li>
-            <li>
-              <a href="/sitemap.xml" className="hover:text-signal">
-                Sitemap
-              </a>
-            </li>
-            <li>
-              <a href="/rss.xml" className="hover:text-signal">
-                RSS feed
-              </a>
-            </li>
-          </FooterCol>
+        <div className="mt-10 grid gap-8 border-t border-border pt-7 md:grid-cols-2">
+          <FooterLinks title="Company" links={companyLinks} />
+          <FooterLinks title="Legal" links={legalLinks} />
         </div>
 
-        {/* Category directory */}
-        <div className="mt-14 border-t border-border/60 pt-10">
-          <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            All PDF tools
-          </div>
-          <div className="mt-6 grid gap-8 md:grid-cols-3 lg:grid-cols-6">
-            {cols.map((col) => (
-              <div key={col.label}>
-                <div className="text-sm font-semibold text-foreground">{col.label}</div>
-                <ul className="mt-3 space-y-1.5 text-sm">
-                  {col.tools.map((t) => (
-                    <li key={t.slug}>
-                      <Link
-                        to="/$slug"
-                        params={{ slug: t.seoSlug }}
-                        className="text-muted-foreground hover:text-signal"
-                      >
-                        {t.name}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+        <div className="mt-8 flex flex-col gap-2 border-t border-border pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>© {new Date().getFullYear()} Lazy PDF. Crafted with care.</span>
+          <span>Simple tools, done right.</span>
         </div>
-      </div>
-
-      <div className="border-t border-border/60 py-6 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()} Lazy PDF. Crafted with care.
       </div>
     </footer>
   );
 }
 
-function FooterCol({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {title}
-      </div>
-      <ul className="mt-3 space-y-2 text-sm">{children}</ul>
-    </div>
-  );
+function ToolGroup({ title, links }: { title: string; links: { label: string; href: string }[] }) {
+  return <div><h3 className="text-sm font-semibold text-foreground">{title}</h3><ul className="mt-3 space-y-2 text-sm">{links.map((link) => <li key={link.href}><a href={link.href} className="text-muted-foreground transition hover:text-signal hover:underline">{link.label}</a></li>)}</ul></div>;
 }
 
-function FooterLink({
-  to,
-  params,
-  children,
-}: {
-  to: string;
-  params?: Record<string, string>;
-  children: React.ReactNode;
-}) {
-  return (
-    <li>
-      <Link
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic footer link wrapper; TanStack Router's typed `to` union doesn't accept a plain string here
-        to={to as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
-        params={params as any}
-        className="text-muted-foreground hover:text-signal"
-      >
-        {children}
-      </Link>
-    </li>
-  );
+function FooterLinks({ title, links }: { title: string; links: { label: string; to: string }[] }) {
+  return <div><h2 className="text-sm font-semibold text-foreground">{title}</h2><ul className="mt-4 flex flex-wrap gap-x-7 gap-y-3 text-sm">{links.map((link) => <li key={link.to}><Link to={link.to} className="text-muted-foreground transition hover:text-signal hover:underline">{link.label}</Link></li>)}</ul></div>;
 }
