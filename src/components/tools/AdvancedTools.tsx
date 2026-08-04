@@ -222,6 +222,23 @@ function truncateToWidth(
   return `${t}…`;
 }
 
+/**
+ * Built-in PDF fonts use WinAnsi and throw for characters outside that
+ * encoding. Preserve a readable approximation so one cell cannot abort the
+ * entire workbook conversion.
+ */
+function toPdfSafeText(value: string) {
+  return value
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014\u2212]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/[\u00B9\u00B2\u00B3]/g, (character) => ({ "¹": "1", "²": "2", "³": "3" })[character]!)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036F]/g, "")
+    .replace(/[^\x20-\x7E\n\r\t]/g, "?");
+}
+
 async function renderSpreadsheetPdf(sheets: Array<{ heading: string; rows: string[][] }>) {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -248,7 +265,7 @@ async function renderSpreadsheetPdf(sheets: Array<{ heading: string; rows: strin
     let page = doc.addPage([pageWidth, pageHeight]);
     let cursorY = pageHeight - margin;
 
-    page.drawText(sheet.heading, { x: margin, y: cursorY, size: 14, font: boldFont, color: rgb(0.05, 0.05, 0.05) });
+    page.drawText(toPdfSafeText(sheet.heading), { x: margin, y: cursorY, size: 14, font: boldFont, color: rgb(0.05, 0.05, 0.05) });
     cursorY -= 26;
 
     function drawRow(cells: string[], isHeader: boolean, zebra: boolean) {
@@ -269,7 +286,8 @@ async function renderSpreadsheetPdf(sheets: Array<{ heading: string; rows: strin
       }
       cells.slice(0, colCount).forEach((cell, ci) => {
         const usedFont = isHeader ? boldFont : font;
-        page.drawText(truncateToWidth(cell ?? "", colWidth - 8, usedFont, fontSize), {
+        const safeCell = toPdfSafeText(cell ?? "").replace(/[\r\n]+/g, " ");
+        page.drawText(truncateToWidth(safeCell, colWidth - 8, usedFont, fontSize), {
           x: margin + ci * colWidth + 4,
           y: cursorY - rowHeight + 5,
           size: fontSize,
