@@ -16,7 +16,7 @@ const primaryGroups = [
   { label: "OCR", slugs: ["ocr", "ocr-images", "searchable-pdf"] },
   { label: "Utility Tools", slugs: ["compare", "flatten", "extract-images", "remove-images", "extract-text", "metadata"] },
 ] as const;
-const primarySlugs = new Set(primaryGroups.flatMap((group) => group.slugs));
+const primarySlugs = new Set<string>(primaryGroups.flatMap((group) => group.slugs));
 
 export const Route = createFileRoute("/tools")({
   component: () => <Outlet />,

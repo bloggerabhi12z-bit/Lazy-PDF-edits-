@@ -25,7 +25,6 @@
     "noEmit": true,
 
     /* Base URL and Path Alias */
-    "baseUrl": ".",
     "paths": {
       "@/*": [
         "src/*"

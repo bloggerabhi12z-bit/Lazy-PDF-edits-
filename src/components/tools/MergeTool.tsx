@@ -88,15 +88,7 @@ export function MergeTool() {
       }
       const merged = await out.save();
 
-      // Publish the merged file blob to feed your app's ResultPreview system automatically
-      const mergedBlob = new Blob([merged], { type: "application/pdf" });
-      const { publishResult } = await import("@/lib/result-store");
-      publishResult({
-        url: URL.createObjectURL(mergedBlob),
-        name: "lazy-pdf-merged.pdf",
-        size: mergedBlob.size,
-        mime: "application/pdf"
-      });
+      downloadBlob(merged, "lazy-pdf-merged.pdf", "application/pdf");
 
       toast.success("Merged PDF ready.");
     } catch {
