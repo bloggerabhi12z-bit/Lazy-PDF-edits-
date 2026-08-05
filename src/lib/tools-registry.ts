@@ -35,6 +35,12 @@ import {
   ImageDown,
   Code2,
   BookOpen,
+  FolderOpen,
+  FileArchive,
+  Brain,
+  Languages,
+  FileDown,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -72,12 +78,14 @@ export const TOOLS: ToolMeta[] = [
   { slug: "duplicate-pages", seoSlug: "duplicate-pdf-pages", name: "Duplicate Pages", tagline: "Repeat a page in a PDF.", description: "Choose a page and insert one or more copies directly after it.", keywords: ["duplicate pdf pages", "copy pdf page", "repeat pdf page"], icon: Copy, accentClass: "from-cyan-200 to-blue-200", status: "ready", category: "organize" },
   { slug: "rotate", seoSlug: "rotate-pdf", name: "Rotate PDF", tagline: "Rotate pages in a document.", description: "Fix sideways scans instantly. Rotate 90°, 180°, or 270° across the document.", keywords: ["rotate pdf", "rotate pdf pages", "pdf rotator", "turn pdf sideways"], icon: RotateCw, accentClass: "from-rose-200 to-pink-200", status: "ready", category: "organize" },
   { slug: "crop", seoSlug: "crop-pdf", name: "Crop PDF", tagline: "Trim margins from pages.", description: "Trim the same margin from every page in a PDF.", keywords: ["crop pdf", "trim pdf margins", "pdf cropper", "resize pdf"], icon: Crop, accentClass: "from-stone-200 to-neutral-200", status: "ready", category: "organize" },
+  { slug: "organize-pdf", seoSlug: "organize-pdf", name: "Organize PDF", tagline: "Reorder, delete, extract, and rotate pages.", description: "Full page management: reorder, delete, extract, rotate, and duplicate pages in one place.", keywords: ["organize pdf", "pdf page organizer", "manage pdf pages", "reorder pdf pages"], icon: FolderOpen, accentClass: "from-amber-200 to-yellow-200", status: "soon", category: "organize" },
 
   // Optimize / Repair
   { slug: "compress", seoSlug: "compress-pdf", name: "Compress PDF", tagline: "Shrink a PDF's file size.", description: "Re-encodes objects and strips metadata to reduce file size.", keywords: ["compress pdf", "reduce pdf size", "pdf compressor", "shrink pdf", "make pdf smaller"], icon: Minimize2, accentClass: "from-emerald-200 to-teal-200", status: "ready", category: "optimize" },
   { slug: "repair", seoSlug: "repair-pdf", name: "Repair PDF", tagline: "Fix minor structural issues.", description: "Parses and re-saves the PDF, resolving many common corruption issues.", keywords: ["repair pdf", "fix corrupt pdf", "pdf repair tool", "recover pdf"], icon: Wrench, accentClass: "from-amber-200 to-yellow-200", status: "ready", category: "optimize" },
   { slug: "flatten", seoSlug: "flatten-pdf", name: "Flatten PDF", tagline: "Flatten form fields into content.", description: "Bakes form field values into the page so they can't be edited.", keywords: ["flatten pdf", "flatten pdf form", "lock pdf form", "pdf flattener"], icon: Layers, accentClass: "from-slate-200 to-zinc-200", status: "ready", category: "optimize" },
   { slug: "remove-blank-pages", seoSlug: "remove-blank-pages-from-pdf", name: "Remove Blank Pages", tagline: "Clean empty text pages.", description: "Detect and remove pages with no extractable text.", keywords: ["remove blank pages", "delete empty pdf pages", "clean pdf"], icon: FileMinus2, accentClass: "from-orange-200 to-amber-200", status: "ready", category: "optimize" },
+  { slug: "pdf-to-pdfa", seoSlug: "pdf-to-pdfa", name: "PDF to PDF/A", tagline: "Convert PDFs to archival format.", description: "Convert standard PDFs to PDF/A format for long-term preservation and archiving.", keywords: ["pdf to pdfa", "pdf archive", "pdfa converter", "archival pdf"], icon: FileArchive, accentClass: "from-stone-200 to-zinc-200", status: "soon", category: "optimize" },
 
   // Edit
   { slug: "edit", seoSlug: "edit-pdf", name: "Edit PDF", tagline: "Add text to a PDF.", description: "Add text to the first page of an existing PDF.", keywords: ["edit pdf", "pdf editor", "edit pdf online", "add text to pdf"], icon: Pencil, accentClass: "from-fuchsia-200 to-pink-200", status: "ready", category: "edit" },
@@ -89,6 +97,8 @@ export const TOOLS: ToolMeta[] = [
   { slug: "remove-metadata", seoSlug: "remove-pdf-metadata", name: "Remove Metadata", tagline: "Clear document properties.", description: "Remove common title, author, subject, keyword, creator, and producer fields.", keywords: ["remove pdf metadata", "strip pdf metadata", "clean pdf properties"], icon: Trash2, accentClass: "from-neutral-200 to-stone-200", status: "ready", category: "edit" },
   { slug: "redact", seoSlug: "redact-pdf", name: "Redact PDF", tagline: "Permanently black-out content.", description: "Rasterizes every page and permanently blacks out the selected area, removing selectable source text.", keywords: ["redact pdf", "black out pdf", "hide pdf content", "pdf redaction"], icon: Highlighter, accentClass: "from-zinc-200 to-slate-200", status: "ready", category: "edit" },
   { slug: "compare", seoSlug: "compare-pdf", name: "Compare PDFs", tagline: "Text diff of two PDFs.", description: "Compare extracted text from two PDF files and download a report.", keywords: ["compare pdf", "pdf diff", "compare two pdfs", "pdf comparison"], icon: GitCompare, accentClass: "from-orange-200 to-amber-200", status: "ready", category: "edit" },
+  { slug: "ai-summarizer", seoSlug: "ai-pdf-summarizer", name: "AI Summarizer", tagline: "Summarize PDFs with AI.", description: "Extract key points and generate summaries from your PDF documents using AI.", keywords: ["ai pdf summarizer", "summarize pdf", "pdf summary", "ai document summary"], icon: Brain, accentClass: "from-violet-200 to-purple-200", status: "soon", category: "edit" },
+  { slug: "translate-pdf", seoSlug: "translate-pdf", name: "Translate PDF", tagline: "Translate PDF content.", description: "Translate your PDF documents into different languages while preserving layout.", keywords: ["translate pdf", "pdf translator", "pdf language translation", "translate document"], icon: Languages, accentClass: "from-cyan-200 to-teal-200", status: "soon", category: "edit" },
 
   // Security
   { slug: "protect", seoSlug: "protect-pdf", name: "Protect PDF", tagline: "Password-protect a PDF.", description: "Encrypt a PDF with an opening password in your browser.", keywords: ["protect pdf", "password protect pdf", "encrypt pdf", "secure pdf"], icon: Lock, accentClass: "from-rose-200 to-red-200", status: "ready", category: "security" },
@@ -120,6 +130,8 @@ export const TOOLS: ToolMeta[] = [
   { slug: "ocr", seoSlug: "ocr-pdf", name: "OCR PDF", tagline: "Read scanned PDFs.", description: "Run browser OCR on scanned PDF pages and download text.", keywords: ["ocr pdf", "scanned pdf to text", "pdf ocr online", "read scanned pdf"], icon: ScanText, accentClass: "from-indigo-200 to-blue-200", status: "ready", category: "convert-from" },
   { slug: "ocr-images", seoSlug: "ocr-images", name: "OCR Images", tagline: "Read text in images.", description: "Run browser OCR over one or more image files and download the extracted text.", keywords: ["ocr images", "image to text", "read image text"], icon: ScanText, accentClass: "from-indigo-200 to-blue-200", status: "ready", category: "convert-from" },
   { slug: "pdf-to-long-image", seoSlug: "pdf-to-long-image", name: "PDF to Long Image", tagline: "Join PDF pages vertically.", description: "Render every page into one tall PNG image for easy sharing.", keywords: ["pdf to long image", "pdf to tall image", "combine pdf pages image"], icon: ImageDown, accentClass: "from-pink-200 to-rose-200", status: "ready", category: "convert-from" },
+  { slug: "pdf-to-markdown", seoSlug: "pdf-to-markdown", name: "PDF to Markdown", tagline: "Convert PDF to Markdown.", description: "Extract PDF text content and convert it to clean Markdown format.", keywords: ["pdf to markdown", "pdf to md", "convert pdf to markdown", "pdf to text"], icon: FileDown, accentClass: "from-gray-200 to-slate-200", status: "soon", category: "convert-from" },
+  { slug: "create-workflow", seoSlug: "create-pdf-workflow", name: "Create Workflow", tagline: "Chain multiple PDF operations.", description: "Combine multiple PDF operations into a single automated workflow.", keywords: ["pdf workflow", "automate pdf", "pdf batch", "pdf pipeline"], icon: Workflow, accentClass: "from-emerald-200 to-green-200", status: "soon", category: "organize" },
 ];
 
 export const CATEGORIES: { id: ToolCategory; label: string }[] = [
@@ -162,4 +174,24 @@ export const POPULAR_TOOL_SLUGS = [
 
 export function getPopularTools() {
   return POPULAR_TOOL_SLUGS.map((s) => TOOLS.find((t) => t.slug === s)!).filter(Boolean);
+}
+
+/** Homepage grid order: 6 rows of 6 tools each */
+export const HOMEPAGE_TOOL_SLUGS = [
+  // Row 1
+  "merge", "split", "compress", "pdf-to-word", "pdf-to-powerpoint", "pdf-to-excel",
+  // Row 2
+  "word-to-pdf", "powerpoint-to-pdf", "excel-to-pdf", "edit", "pdf-to-jpg", "jpg-to-pdf",
+  // Row 3
+  "sign", "watermark", "rotate", "html-to-pdf", "unlock", "protect",
+  // Row 4
+  "organize-pdf", "pdf-to-pdfa", "repair", "page-numbers", "scan-to-pdf", "ocr",
+  // Row 5
+  "compare", "redact", "crop", "fill-forms", "ai-summarizer", "translate-pdf",
+  // Row 6
+  "pdf-to-markdown", "create-workflow",
+];
+
+export function getHomepageTools() {
+  return HOMEPAGE_TOOL_SLUGS.map((s) => TOOLS.find((t) => t.slug === s)!).filter(Boolean);
 }
