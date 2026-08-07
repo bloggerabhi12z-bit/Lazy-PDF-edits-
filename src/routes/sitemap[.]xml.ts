@@ -3,7 +3,7 @@ import type {} from "@tanstack/react-start";
 import { TOOLS } from "@/lib/tools-registry";
 import { POSTS } from "@/lib/blog-data";
 
-const BASE_URL = "https://storied-longma-4c5c8e.netlify.app";
+const BASE_URL = "https://www.lazypdf.in";
 
 interface Entry {
   path: string;
