@@ -10,11 +10,11 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/")({
-  head: () => ({ meta: [{ title: "Lazy PDF — Private, fast PDF tools" }, { name: "description", content: "Edit, convert, organize, compress, sign, and protect PDFs in your browser with a polished private toolkit." }, { property: "og:title", content: "Lazy PDF — Private, fast PDF tools" }, { property: "og:description", content: "A complete PDF workspace that keeps documents on your device." }] }),
+  head: () => ({ meta: [{ title: "Lazy PDF — Private, fast PDF tools" }, { name: "description", content: "Edit, convert, organize, compress, sign, and protect PDFs in your browser with a polished private toolkit." }, { property: "og:title", content: "Lazy PDF — Private, fast PDF tools" }, { property: "og:description", content: "A complete PDF workspace that keeps documents on your device." }, { name: "msvalidate.01", content: "6E0E63815179D038821D3378267A4A39" }] }),
   component: LandingPage,
 });
 
-const popularSlugs = ["merge", "compress", "edit", "pdf-to-word", "jpg-to-pdf", "sign"];
+const popularSlugs = ["merge", "compress", "pdf-to-word", "edit", "jpg-to-pdf", "sign"];
 const faqs = [
   { q: "Do my PDFs leave my device?", a: "Normal processing runs in your browser. Document bytes are not uploaded or stored. Shared-link cloud import is an explicit exception: the selected public file is streamed once to your browser and never retained." },
   { q: "Which formats are supported?", a: "Lazy PDF works with PDF, JPG, PNG, DOCX, XLSX, PPTX, HTML, EPUB, ZIP exports, and plain text depending on the selected tool." },
