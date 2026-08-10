@@ -176,9 +176,9 @@ export function getPopularTools() {
   return POPULAR_TOOL_SLUGS.map((s) => TOOLS.find((t) => t.slug === s)!).filter(Boolean);
 }
 
-/** Homepage grid order: 6 rows of 6 tools each */
+/** Homepage grid order: 6 rows of 6 tools each, ranked by popularity (matches iLovePDF ordering) */
 export const HOMEPAGE_TOOL_SLUGS = [
-  // Row 1
+  // Row 1 — most popular
   "merge", "split", "compress", "pdf-to-word", "pdf-to-powerpoint", "pdf-to-excel",
   // Row 2
   "word-to-pdf", "powerpoint-to-pdf", "excel-to-pdf", "edit", "pdf-to-jpg", "jpg-to-pdf",
