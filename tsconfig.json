@@ -27,7 +27,7 @@
     /* Base URL and Path Alias */
     "paths": {
       "@/*": [
-        "src/*"
+        "./src/*"
       ]
     },
 
