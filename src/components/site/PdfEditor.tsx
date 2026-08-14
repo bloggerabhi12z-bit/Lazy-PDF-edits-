@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -141,85 +142,23 @@ interface PdfEditorProps {
 const MAX_HISTORY = 50;
 const NUDGE = 1;
 const NUDGE_FAST = 10;
-const ACCENT = "#DC2626"; // primary accent used throughout the redesigned chrome — matches the site's button red
+const ACCENT = "#DC2626";
 
-// A broad set of common web-safe and Google Fonts offered for in-editor text styling.
-// Note: the exported/stamped PDF still embeds one of the standard PDF-safe fonts from
-// FONT_OPTIONS (Helvetica / TimesRoman / Courier) — see the "PDF font" control in the
-// properties panel. This wider list controls only the on-screen preview font, so users
-// searching for "edit PDF with Georgia font", "edit PDF Garamond", etc. land on a tool
-// that visibly supports the font they're looking for while the underlying export stays
-// reliable. If your pdf-annotations pipeline gains real font embedding later, wire
-// GOOGLE_FONT_FAMILIES below into stampElements and this becomes a true 1:1 mapping.
 const SYSTEM_FONT_FAMILIES = [
-  "Helvetica",
-  "Arial",
-  "Times New Roman",
-  "Georgia",
-  "Courier New",
-  "Verdana",
-  "Tahoma",
-  "Trebuchet MS",
-  "Palatino",
-  "Garamond",
-  "Book Antiqua",
-  "Century Gothic",
-  "Franklin Gothic Medium",
-  "Lucida Console",
-  "Lucida Sans Unicode",
-  "Segoe UI",
-  "Calibri",
-  "Cambria",
-  "Consolas",
-  "Impact",
-  "Comic Sans MS",
-  "Rockwell",
-  "Baskerville",
-  "Optima",
-  "Didot",
-  "Futura",
+  "Helvetica", "Arial", "Times New Roman", "Georgia", "Courier New", "Verdana", 
+  "Tahoma", "Trebuchet MS", "Palatino", "Garamond", "Book Antiqua", "Century Gothic", 
+  "Franklin Gothic Medium", "Lucida Console", "Lucida Sans Unicode", "Segoe UI", 
+  "Calibri", "Cambria", "Consolas", "Impact", "Comic Sans MS", "Rockwell", 
+  "Baskerville", "Optima", "Didot", "Futura",
 ];
 const GOOGLE_FONT_FAMILIES = [
-  "Roboto",
-  "Open Sans",
-  "Lato",
-  "Montserrat",
-  "Poppins",
-  "Inter",
-  "Merriweather",
-  "Playfair Display",
-  "Nunito",
-  "Raleway",
-  "Ubuntu",
-  "PT Serif",
-  "Source Sans Pro",
-  "Oswald",
-  "Noto Sans",
-  "Work Sans",
-  "Fira Sans",
-  "Rubik",
-  "Karla",
-  "Quicksand",
-  "Josefin Sans",
-  "Crimson Text",
-  "Libre Baskerville",
-  "EB Garamond",
-  "Cormorant Garamond",
-  "DM Sans",
-  "Space Grotesk",
-  "Bitter",
-  "Zilla Slab",
-  "IBM Plex Sans",
-  "IBM Plex Serif",
-  "IBM Plex Mono",
-  "Roboto Mono",
-  "JetBrains Mono",
-  "Caveat",
-  "Pacifico",
-  "Dancing Script",
-  "Great Vibes",
-  "Shadows Into Light",
-  "Indie Flower",
+  "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Inter", "Merriweather", 
+  "Playfair Display", "Nunito", "Raleway", "Ubuntu", "PT Serif", "Source Sans Pro", 
+  "Oswald", "Noto Sans", "Work Sans", "Fira Sans", "Rubik", "Karla", "Quicksand", 
+  "Josefin Sans", "Crimson Text", "Libre Baskerville", "EB Garamond", "Cormorant Garamond", 
+  "DM Sans", "Space Grotesk", "Bitter", "Zilla Slab", "IBM Plex Sans", "IBM Plex Serif", 
+  "IBM Plex Mono", "Roboto Mono", "JetBrains Mono", "Caveat", "Pacifico", "Dancing Script", 
+  "Great Vibes", "Shadows Into Light", "Indie Flower",
 ];
 const FONT_PREVIEW_CHOICES = [...SYSTEM_FONT_FAMILIES, ...GOOGLE_FONT_FAMILIES];
 
@@ -254,12 +193,17 @@ export function PdfEditor({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeTool, setActiveTool] = useState<Tool>("select");
 
-  // UI Panels — both collapsible, both default open on desktop
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
   const [showRightSidebar, setShowRightSidebar] = useState<boolean>(true);
-  // On-screen preview font per text element (id -> font family name from FONT_PREVIEW_CHOICES).
-  // Purely cosmetic in the editor; the exported PDF still embeds a standard PDF font
-  // (see the "PDF font" control, which maps to FONT_OPTIONS / TextElement.font).
+
+  // Auto-collapse sidebars on smaller screens initially
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setShowLeftSidebar(false);
+      setShowRightSidebar(false);
+    }
+  }, []);
+
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
   const loadedGoogleFontsRef = useRef<Set<string>>(new Set());
 
@@ -277,10 +221,9 @@ export function PdfEditor({
   const [moreToolsPos, setMoreToolsPos] = useState<{ top: number; left: number } | null>(null);
   const moreBtnRef = useRef<HTMLDivElement | null>(null);
 
-  // Close the "More" tools dropdown on outside click or Escape
   useEffect(() => {
     if (!showMoreTools) return;
-    function onDocMouseDown(ev: MouseEvent) {
+    function onDocPointerDown(ev: PointerEvent) {
       const target = ev.target as Node;
       if (moreBtnRef.current && !moreBtnRef.current.contains(target)) {
         setShowMoreTools(false);
@@ -289,10 +232,10 @@ export function PdfEditor({
     function onDocKey(ev: KeyboardEvent) {
       if (ev.key === "Escape") setShowMoreTools(false);
     }
-    document.addEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onDocKey);
     return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
+      document.removeEventListener("pointerdown", onDocPointerDown);
       document.removeEventListener("keydown", onDocKey);
     };
   }, [showMoreTools]);
@@ -348,7 +291,6 @@ export function PdfEditor({
     setSavedSignatures(getSavedSignatures());
   }, [signatureOpen]);
 
-  // Load PDF
   useEffect(() => {
     let cancelled = false;
     setPhase("reading");
@@ -405,7 +347,6 @@ export function PdfEditor({
     };
   }, [file]);
 
-  // Generate Thumbnails (lazy, cached, cancels on unmount / file change)
   useEffect(() => {
     if (!pdf) return;
     let cancelled = false;
@@ -435,7 +376,6 @@ export function PdfEditor({
     };
   }, [pdf]);
 
-  // History Sync
   useEffect(() => {
     if (pages.length === 0) return;
     if (skipHistoryRef.current) {
@@ -596,7 +536,6 @@ export function PdfEditor({
     }
   };
 
-  /* -------------------------- Element helpers -------------------------- */
   const addElement = useCallback((el: AnyElement) => {
     setElements((es) => [...es, el]);
     setSelectedIds(new Set([el.id]));
@@ -671,7 +610,6 @@ export function PdfEditor({
   );
   const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null;
 
-  // Keyboard shortcuts
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
       const t = ev.target as HTMLElement | null;
@@ -1010,9 +948,6 @@ export function PdfEditor({
 
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden select-none font-sans text-gray-900 dark:text-gray-100">
-      {/* SEO: visually hidden (not display:none) so it stays accessible to screen readers and
-          search crawlers without disrupting the visual UI. Genuine, accurate description of
-          what this screen does — not keyword stuffing — so it's safe from a cloaking standpoint. */}
       <p className="sr-only">
         Edit PDF online for free, directly in your browser. Add and format text, insert images
         and signatures, highlight, draw, and fill form fields on any PDF page. Style your text
@@ -1031,7 +966,6 @@ export function PdfEditor({
         }}
       />
 
-      {/* ============================ TOP HEADER ============================ */}
       <header className="h-12 shrink-0 flex items-center justify-between gap-3 px-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 z-30">
         <div className="flex items-center gap-2 min-w-0">
           <button
@@ -1091,7 +1025,6 @@ export function PdfEditor({
         </div>
       </header>
 
-      {/* Search bar (drops down from header, non-blocking) */}
       <AnimatePresence>
         {showSearch && (
           <motion.div
@@ -1164,7 +1097,6 @@ export function PdfEditor({
         )}
       </AnimatePresence>
 
-      {/* ============================ TOOLBAR ============================ */}
       <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-x-auto z-20">
         <ToolBtn icon={<MousePointer2 />} label="Select" active={activeTool === "select"} onClick={() => { setActiveTool("select"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<Hand />} label="Hand" active={activeTool === "hand"} onClick={() => { setActiveTool("hand"); setSelectedIds(new Set()); }} />
@@ -1220,7 +1152,6 @@ export function PdfEditor({
             document.body
           )}
 
-        {/* Mobile save button (header one is hidden below sm) */}
         <div className="ml-auto sm:hidden">
           <Button
             onClick={apply}
@@ -1234,9 +1165,7 @@ export function PdfEditor({
         </div>
       </div>
 
-      {/* ============================ BODY ============================ */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* LEFT: Page Thumbnails */}
         <AnimatePresence initial={false}>
           {showLeftSidebar && (
             <motion.aside
@@ -1339,7 +1268,6 @@ export function PdfEditor({
           )}
         </AnimatePresence>
 
-        {/* Collapse handle for left sidebar */}
         <button
           onClick={() => setShowLeftSidebar((s) => !s)}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
@@ -1350,7 +1278,6 @@ export function PdfEditor({
           {showLeftSidebar ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </button>
 
-        {/* CENTER: PDF Canvas */}
         <main className="flex-1 relative overflow-hidden flex flex-col bg-[#EDEEF1] dark:bg-gray-950">
           {phase === "reading" || phase === "rendering" ? (
             <div className="m-auto flex flex-col items-center gap-3 text-gray-500 dark:text-gray-400">
@@ -1382,7 +1309,6 @@ export function PdfEditor({
             />
           )}
 
-          {/* FLOATING BOTTOM CONTROL BAR */}
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[#1F2937]/95 text-white px-2.5 py-1.5 rounded-lg shadow-lg flex items-center gap-2 z-30 backdrop-blur-sm text-xs">
             <button
               onClick={() => {
@@ -1448,7 +1374,6 @@ export function PdfEditor({
           </div>
         </main>
 
-        {/* Collapse handle for right sidebar */}
         <button
           onClick={() => setShowRightSidebar((s) => !s)}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-l-lg py-3 px-1.5 text-white shadow-md transition-colors"
@@ -1459,7 +1384,6 @@ export function PdfEditor({
           {showRightSidebar ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
 
-        {/* RIGHT: Contextual properties panel */}
         <AnimatePresence initial={false}>
           {showRightSidebar && (
             <motion.aside
@@ -1513,7 +1437,6 @@ export function PdfEditor({
         </AnimatePresence>
       </div>
 
-      {/* SIGNATURE MODAL */}
       {signatureOpen && (
         <SignatureModal
           tab={signatureTab}
@@ -1545,7 +1468,6 @@ export function PdfEditor({
   );
 }
 
-/* small inline icon since lucide's "Minus" was repurposed visually as zoom-out */
 function ZoomOutIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1554,9 +1476,6 @@ function ZoomOutIcon() {
   );
 }
 
-/* =========================================================
-   COMPACT TOOLBAR BUTTON
-   ========================================================= */
 function ToolBtn({
   icon,
   label,
@@ -1593,10 +1512,6 @@ function ToolBtn({
 function Divider() {
   return <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />;
 }
-
-/* =========================================================
-   PREVIEW CANVAS (Renders Continuous Scrolling Pages)
-   ========================================================= */
 
 function PreviewCanvas(props: {
   pdf: PdfDoc | null;
@@ -1674,7 +1589,7 @@ function PreviewCanvas(props: {
     return () => io.disconnect();
   }, [props.pages.length, props.onCurrentChange]);
 
-  function onContainerMouseDown(e: ReactMouseEvent) {
+  function onContainerPointerDown(e: ReactPointerEvent) {
     if (props.activeTool !== "hand") return;
     const el = containerRef.current;
     if (!el) return;
@@ -1685,7 +1600,7 @@ function PreviewCanvas(props: {
       scrollTop: el.scrollTop,
       el,
     };
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: PointerEvent) {
       const st = props.panStateRef.current;
       if (!st) return;
       st.el.scrollLeft = st.scrollLeft - (ev.clientX - st.startX);
@@ -1693,19 +1608,24 @@ function PreviewCanvas(props: {
     }
     function onUp() {
       props.panStateRef.current = null;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   }
 
   return (
     <div
       ref={containerRef}
-      onMouseDown={onContainerMouseDown}
+      onPointerDown={onContainerPointerDown}
       className="w-full h-full overflow-auto flex flex-col items-center py-6 px-2 sm:px-4"
-      style={{ cursor: props.activeTool === "hand" ? "grab" : undefined }}
+      style={{ 
+        cursor: props.activeTool === "hand" ? "grab" : undefined,
+        touchAction: props.activeTool === "hand" ? "none" : "auto", 
+      }}
     >
       <div className="flex flex-col items-center gap-8 pb-32">
         {props.pages.map((p, i) => (
@@ -1883,7 +1803,6 @@ function PagePane(props: {
   );
 }
 
-/* Annotation Layer & Vector Manipulation */
 function elementBounds(el: AnyElement) {
   return { x1: el.x, y1: el.y, x2: el.x + el.width, y2: el.y + el.height };
 }
@@ -1984,7 +1903,7 @@ function AnnotationLayer(props: {
     return null;
   }
 
-  function onLayerMouseDown(e: ReactMouseEvent) {
+  function onLayerPointerDown(e: ReactPointerEvent) {
     if (!props.interactive) return;
     if (!isCreationTool) {
       if (e.target === layerRef.current) {
@@ -1992,7 +1911,7 @@ function AnnotationLayer(props: {
         props.onSetSelectedIds(new Set());
         const start = toPt(e.clientX, e.clientY);
         setMarquee({ x: start.x, y: start.y, w: 0, h: 0 });
-        function onMove(ev: MouseEvent) {
+        function onMove(ev: PointerEvent) {
           const p = toPt(ev.clientX, ev.clientY);
           setMarquee({
             x: Math.min(start.x, p.x),
@@ -2001,9 +1920,10 @@ function AnnotationLayer(props: {
             h: Math.abs(p.y - start.y),
           });
         }
-        function onUp(ev: MouseEvent) {
-          window.removeEventListener("mousemove", onMove);
-          window.removeEventListener("mouseup", onUp);
+        function onUp(ev: PointerEvent) {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          window.removeEventListener("pointercancel", onUp);
           const p = toPt(ev.clientX, ev.clientY);
           const rect = {
             x1: Math.min(start.x, p.x),
@@ -2019,8 +1939,9 @@ function AnnotationLayer(props: {
           }
           setMarquee(null);
         }
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onUp);
       }
       return;
     }
@@ -2077,7 +1998,7 @@ function AnnotationLayer(props: {
     if (props.activeTool === "draw") setDrawPoints([pt]);
     else setDraft({ x: pt.x, y: pt.y, w: 0, h: 0 });
 
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: PointerEvent) {
       const p = toPt(ev.clientX, ev.clientY);
       if (props.activeTool === "draw") {
         setDrawPoints((pts) => (pts ? [...pts, p] : [p]));
@@ -2091,9 +2012,10 @@ function AnnotationLayer(props: {
         });
       }
     }
-    function onUp(ev: MouseEvent) {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+    function onUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
       const p = toPt(ev.clientX, ev.clientY);
       const start = dragStateRef.current?.startPt ?? p;
       dragStateRef.current = null;
@@ -2190,11 +2112,12 @@ function AnnotationLayer(props: {
         });
       }
     }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   }
 
-  function startMove(e: ReactMouseEvent, el: AnyElement) {
+  function startMove(e: ReactPointerEvent, el: AnyElement) {
     e.stopPropagation();
     if (!props.interactive || props.activeTool !== "select") return;
     let ids = props.selectedIds;
@@ -2222,7 +2145,7 @@ function AnnotationLayer(props: {
       if (found) offsets[id] = { x: pt.x - found.x, y: pt.y - found.y };
     }
     moveStateRef.current = { ids: Array.from(ids) as string[], offsets };
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: PointerEvent) {
       const p = toPt(ev.clientX, ev.clientY);
       const st = moveStateRef.current;
       if (!st) return;
@@ -2233,18 +2156,20 @@ function AnnotationLayer(props: {
     }
     function onUp() {
       moveStateRef.current = null;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   }
 
-  function startResize(e: ReactMouseEvent, el: AnyElement) {
+  function startResize(e: ReactPointerEvent, el: AnyElement) {
     e.stopPropagation();
     resizeStateRef.current = { id: el.id, startW: el.width, startH: el.height };
     const startClient = { x: e.clientX, y: e.clientY };
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: PointerEvent) {
       const st = resizeStateRef.current;
       if (!st) return;
       const dx = (ev.clientX - startClient.x) / props.scale;
@@ -2256,14 +2181,16 @@ function AnnotationLayer(props: {
     }
     function onUp() {
       resizeStateRef.current = null;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   }
 
-  function startRotate(e: ReactMouseEvent, el: AnyElement) {
+  function startRotate(e: ReactPointerEvent, el: AnyElement) {
     e.stopPropagation();
     const rect = layerRef.current!.getBoundingClientRect();
     const centerX = rect.left + (el.x + el.width / 2) * props.scale;
@@ -2276,7 +2203,7 @@ function AnnotationLayer(props: {
       startAngle,
       startRotation: el.rotation,
     };
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: PointerEvent) {
       const st = rotateStateRef.current;
       if (!st) return;
       const angle = Math.atan2(ev.clientY - st.centerY, ev.clientX - st.centerX);
@@ -2287,11 +2214,13 @@ function AnnotationLayer(props: {
     }
     function onUp() {
       rotateStateRef.current = null;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   }
 
   return (
@@ -2301,8 +2230,9 @@ function AnnotationLayer(props: {
       style={{
         cursor: isCreationTool ? "crosshair" : props.activeTool === "hand" ? undefined : "default",
         pointerEvents: props.interactive ? "auto" : "none",
+        touchAction: isCreationTool ? "none" : "auto", 
       }}
-      onMouseDown={onLayerMouseDown}
+      onPointerDown={onLayerPointerDown}
     >
       {props.elements.map((el: AnyElement) => {
         const selected = props.selectedIds.has(el.id);
@@ -2320,6 +2250,7 @@ function AnnotationLayer(props: {
           opacity: el.opacity,
           transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
           transformOrigin: "center center",
+          touchAction: "none",
         };
 
         let body: React.ReactNode = null;
@@ -2487,7 +2418,7 @@ function AnnotationLayer(props: {
               <textarea
                 value={s.note}
                 onChange={(e2) => props.onUpdateElement(el.id, { note: e2.target.value })}
-                onMouseDown={(e2) => e2.stopPropagation()}
+                onPointerDown={(e2) => e2.stopPropagation()}
                 placeholder="Note…"
                 style={{
                   width: "100%",
@@ -2509,7 +2440,7 @@ function AnnotationLayer(props: {
               value={f.value}
               placeholder={f.placeholder}
               onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })}
-              onMouseDown={(e2) => e2.stopPropagation()}
+              onPointerDown={(e2) => e2.stopPropagation()}
               style={{
                 width: "100%",
                 height: "100%",
@@ -2526,7 +2457,7 @@ function AnnotationLayer(props: {
           const f = el as FieldCheckboxElement;
           body = (
             <div
-              onMouseDown={(e2) => {
+              onPointerDown={(e2) => {
                 e2.stopPropagation();
                 props.onUpdateElement(el.id, { checked: !f.checked });
               }}
@@ -2549,7 +2480,7 @@ function AnnotationLayer(props: {
           const f = el as FieldRadioElement;
           body = (
             <div
-              onMouseDown={(e2) => {
+              onPointerDown={(e2) => {
                 e2.stopPropagation();
                 props.onUpdateElement(el.id, { checked: !f.checked });
               }}
@@ -2576,7 +2507,7 @@ function AnnotationLayer(props: {
             <select
               value={f.value}
               onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })}
-              onMouseDown={(e2) => e2.stopPropagation()}
+              onPointerDown={(e2) => e2.stopPropagation()}
               style={{
                 width: "100%",
                 height: "100%",
@@ -2599,7 +2530,7 @@ function AnnotationLayer(props: {
           <div
             key={el.id}
             style={style}
-            onMouseDown={(e) => startMove(e, el)}
+            onPointerDown={(e) => startMove(e, el)}
             className={cn(
               selected &&
                 props.activeTool === "select" &&
@@ -2614,7 +2545,7 @@ function AnnotationLayer(props: {
               el.type !== "sticky" &&
               !el.type.startsWith("field-") && (
                 <div
-                  onMouseDown={(e) => startResize(e, el)}
+                  onPointerDown={(e) => startResize(e, el)}
                   style={{
                     position: "absolute",
                     right: -5,
@@ -2624,12 +2555,13 @@ function AnnotationLayer(props: {
                     borderRadius: 3,
                     background: "#DC2626",
                     cursor: "nwse-resize",
+                    touchAction: "none",
                   }}
                 />
               )}
             {canRotateHandle && (
               <div
-                onMouseDown={(e) => startRotate(e, el)}
+                onPointerDown={(e) => startRotate(e, el)}
                 style={{
                   position: "absolute",
                   left: "50%",
@@ -2640,6 +2572,7 @@ function AnnotationLayer(props: {
                   borderRadius: "50%",
                   background: "#DC2626",
                   cursor: "grab",
+                  touchAction: "none",
                 }}
               />
             )}
@@ -2691,10 +2624,6 @@ function AnnotationLayer(props: {
     </div>
   );
 }
-
-/* =========================================================
-   CONTEXTUAL PROPERTIES PANEL (Right Sidebar)
-   ========================================================= */
 
 function ContextPropertiesPanel({
   selectedElements,
@@ -2937,10 +2866,6 @@ function PropRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-/* =========================================================
-   SIGNATURE & SUCCESS MODALS
-   ========================================================= */
-
 function SignatureModal({
   tab,
   onTabChange,
@@ -2972,11 +2897,11 @@ function SignatureModal({
   onUseSaved: (src: string) => void;
   onDeleteSaved: (id: string) => void;
 }) {
-  function startDraw(e: ReactMouseEvent<HTMLCanvasElement>) {
+  function startDraw(e: ReactPointerEvent<HTMLCanvasElement>) {
     drawingRef.current = true;
     draw(e);
   }
-  function draw(e: ReactMouseEvent<HTMLCanvasElement>) {
+  function draw(e: ReactPointerEvent<HTMLCanvasElement>) {
     if (!drawingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -3046,10 +2971,12 @@ function SignatureModal({
               width={420}
               height={160}
               className="w-full cursor-crosshair rounded-lg border border-[#E5E7EB] dark:border-gray-700 bg-[#F8F9FA] dark:bg-gray-800"
-              onMouseDown={startDraw}
-              onMouseMove={draw}
-              onMouseUp={endDraw}
-              onMouseLeave={endDraw}
+              onPointerDown={startDraw}
+              onPointerMove={draw}
+              onPointerUp={endDraw}
+              onPointerLeave={endDraw}
+              onPointerCancel={endDraw}
+              style={{ touchAction: "none" }}
             />
             <div className="mt-3 flex items-center justify-between">
               <button onClick={onClear} className="text-sm font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-300">
