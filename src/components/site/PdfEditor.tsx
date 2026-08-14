@@ -105,7 +105,7 @@ type PdfPage = {
 
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
 
-type Mode = "select" | "reorder" | "rotate";
+type Mode = "select" | "rotate";
 type Phase = "reading" | "rendering" | "ready" | "error";
 
 type Tool =
@@ -195,8 +195,16 @@ export function PdfEditor({
 
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
   const [showRightSidebar, setShowRightSidebar] = useState<boolean>(true);
+  
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Auto-collapse sidebars on smaller screens initially
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setShowLeftSidebar(false);
@@ -471,19 +479,18 @@ export function PdfEditor({
 
   const deleteSelectedPages = useCallback(() => {
     setPages((ps) => {
+      const anySelected = ps.some((p) => p.selected);
+      if (!anySelected) return ps; 
+      
       const remaining = ps.filter((p) => !p.selected);
       if (remaining.length === 0) {
         toast.error("Your PDF must contain at least one page.");
         return ps;
       }
-      if (remaining.length === ps.length) {
-        if (ps.length <= 1) return ps;
-        return ps.filter((_, i) => i !== current);
-      }
       return remaining;
     });
     setSelectedIds(new Set());
-  }, [current]);
+  }, []);
 
   const duplicatePage = useCallback((i: number) => {
     setPages((ps) => {
@@ -633,7 +640,7 @@ export function PdfEditor({
         if (elements.length > 0 && activeTool === "select") {
           const currentPageId = pages[current]?.id;
           setSelectedIds(new Set(elements.filter((e) => e.pageId === currentPageId).map((e) => e.id)));
-        } else {
+        } else if (mode === "select") {
           selectAllPages();
         }
       } else if (mod && ev.key.toLowerCase() === "f") {
@@ -1165,6 +1172,13 @@ export function PdfEditor({
         </div>
       </div>
 
+      {isMobile && (showLeftSidebar || showRightSidebar) && (
+        <div
+          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
+          onClick={() => { setShowLeftSidebar(false); setShowRightSidebar(false); }}
+        />
+      )}
+
       <div className="flex-1 flex overflow-hidden relative">
         <AnimatePresence initial={false}>
           {showLeftSidebar && (
@@ -1173,7 +1187,10 @@ export function PdfEditor({
               animate={{ width: 200, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.18 }}
-              className="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 z-10"
+              className={cn(
+                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
+                isMobile ? "fixed inset-y-0 left-0 z-40" : "border-r border-gray-200 dark:border-gray-800 z-10"
+              )}
             >
               <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
                 <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
@@ -1306,6 +1323,7 @@ export function PdfEditor({
               onDuplicateElements={duplicateElements}
               panStateRef={panStateRef}
               textPreviewFonts={textPreviewFonts}
+              isMobile={isMobile}
             />
           )}
 
@@ -1391,7 +1409,10 @@ export function PdfEditor({
               animate={{ width: 260, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.18 }}
-              className="bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 flex flex-col shrink-0 z-10"
+              className={cn(
+                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
+                isMobile ? "fixed inset-y-0 right-0 z-40" : "border-l border-gray-200 dark:border-gray-800 z-10"
+              )}
             >
               <div className="flex-1 overflow-y-auto">
                 <ContextPropertiesPanel
@@ -1540,6 +1561,7 @@ function PreviewCanvas(props: {
     el: HTMLElement;
   } | null>;
   textPreviewFonts: Record<string, string>;
+  isMobile: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
@@ -1579,7 +1601,7 @@ function PreviewCanvas(props: {
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
         if (topEntry) {
-          const idx = parseInt(topEntry.getAttribute("data-page-index") || "-1", 10);
+          const idx = parseInt(topEntry.target.getAttribute("data-page-index") || "-1", 10);
           if (idx >= 0) props.onCurrentChange(idx);
         }
       },
@@ -1653,6 +1675,7 @@ function PreviewCanvas(props: {
             onUpdateElements={props.onUpdateElements}
             onDuplicateElements={props.onDuplicateElements}
             textPreviewFonts={props.textPreviewFonts}
+            isMobile={props.isMobile}
           />
         ))}
       </div>
@@ -1683,6 +1706,7 @@ function PagePane(props: {
   onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
   onDuplicateElements: (ids: Set<string>) => void;
   textPreviewFonts: Record<string, string>;
+  isMobile: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -1797,6 +1821,7 @@ function PagePane(props: {
           onDuplicateElements={props.onDuplicateElements}
           interactive={props.activeTool !== "hand"}
           textPreviewFonts={props.textPreviewFonts}
+          isMobile={props.isMobile}
         />
       )}
     </div>
@@ -1827,6 +1852,7 @@ function AnnotationLayer(props: {
   onDuplicateElements: (ids: Set<string>) => void;
   interactive: boolean;
   textPreviewFonts: Record<string, string>;
+  isMobile: boolean;
 }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -2223,6 +2249,9 @@ function AnnotationLayer(props: {
     window.addEventListener("pointercancel", onUp);
   }
 
+  const handleSize = props.isMobile ? 22 : 10;
+  const handleOffset = -(handleSize / 2);
+
   return (
     <div
       ref={layerRef}
@@ -2548,10 +2577,10 @@ function AnnotationLayer(props: {
                   onPointerDown={(e) => startResize(e, el)}
                   style={{
                     position: "absolute",
-                    right: -5,
-                    bottom: -5,
-                    width: 10,
-                    height: 10,
+                    right: handleOffset,
+                    bottom: handleOffset,
+                    width: handleSize,
+                    height: handleSize,
                     borderRadius: 3,
                     background: "#DC2626",
                     cursor: "nwse-resize",
@@ -2566,9 +2595,9 @@ function AnnotationLayer(props: {
                   position: "absolute",
                   left: "50%",
                   top: -22,
-                  width: 10,
-                  height: 10,
-                  marginLeft: -5,
+                  width: handleSize,
+                  height: handleSize,
+                  marginLeft: handleOffset,
                   borderRadius: "50%",
                   background: "#DC2626",
                   cursor: "grab",
@@ -2897,29 +2926,36 @@ function SignatureModal({
   onUseSaved: (src: string) => void;
   onDeleteSaved: (id: string) => void;
 }) {
+  
   function startDraw(e: ReactPointerEvent<HTMLCanvasElement>) {
     drawingRef.current = true;
     draw(e);
   }
+  
   function draw(e: ReactPointerEvent<HTMLCanvasElement>) {
     if (!drawingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.fillStyle = "#111827";
     ctx.beginPath();
-    ctx.arc(e.clientX - rect.left, e.clientY - rect.top, 1.6, 0, Math.PI * 2);
+    ctx.arc(x, y, 1.6, 0, Math.PI * 2);
     ctx.fill();
-    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.lineTo(x, y);
     ctx.strokeStyle = "#111827";
     ctx.lineWidth = 2.4;
     ctx.lineCap = "round";
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.moveTo(x, y);
   }
+
   function endDraw() {
     drawingRef.current = false;
   }
