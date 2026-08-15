@@ -49,7 +49,6 @@ import {
   Underline as UnderlineIcon,
   Undo2,
   X,
-  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/download";
@@ -140,7 +139,7 @@ interface PdfEditorProps {
   onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
 }
 
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 100;
 const NUDGE = 1;
 const NUDGE_FAST = 10;
 
@@ -197,7 +196,6 @@ export function PdfEditor({
   const [activeTool, setActiveTool] = useState<Tool>("select");
 
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
-  const [showRightSidebar, setShowRightSidebar] = useState<boolean>(true);
   
   const [isMobile, setIsMobile] = useState(false);
 
@@ -215,23 +213,12 @@ export function PdfEditor({
   useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setShowLeftSidebar(false);
-      setShowRightSidebar(false);
     }
   }, []);
 
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
   const loadedGoogleFontsRef = useRef<Set<string>>(new Set());
 
-  const setPreviewFont = useCallback((id: string, family: string) => {
-    setTextPreviewFonts((m) => ({ ...m, [id]: family }));
-    if (GOOGLE_FONT_FAMILIES.includes(family) && !loadedGoogleFontsRef.current.has(family)) {
-      loadedGoogleFontsRef.current.add(family);
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, "+")}:wght@400;700&display=swap`;
-      document.head.appendChild(link);
-    }
-  }, []);
   const [showMoreTools, setShowMoreTools] = useState(false);
   const [moreToolsPos, setMoreToolsPos] = useState<{ top: number; left: number } | null>(null);
   const moreBtnRef = useRef<HTMLDivElement | null>(null);
@@ -596,42 +583,6 @@ export function PdfEditor({
       return [...es, ...clones];
     });
   }, []);
-
-  const reorderZ = useCallback(
-    (ids: Set<string>, direction: "forward" | "backward" | "front" | "back") => {
-      setElements((es) => {
-        const next = [...es];
-        const indices = next.map((e, i) => (ids.has(e.id) ? i : -1)).filter((i) => i >= 0);
-        if (indices.length === 0) return es;
-        if (direction === "front") {
-          const items = indices.map((i) => next[i]);
-          const rest = next.filter((_, i) => !indices.includes(i));
-          return [...rest, ...items];
-        }
-        if (direction === "back") {
-          const items = indices.map((i) => next[i]);
-          const rest = next.filter((_, i) => !indices.includes(i));
-          return [...items, ...rest];
-        }
-        const step = direction === "forward" ? 1 : -1;
-        const order = direction === "forward" ? [...indices].reverse() : indices;
-        for (const i of order) {
-          const j = i + step;
-          if (j < 0 || j >= next.length) continue;
-          if (ids.has(next[j].id)) continue;
-          [next[i], next[j]] = [next[j], next[i]];
-        }
-        return next;
-      });
-    },
-    []
-  );
-
-  const selectedElements = useMemo(
-    () => elements.filter((e) => selectedIds.has(e.id)),
-    [elements, selectedIds]
-  );
-  const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null;
 
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
@@ -1132,6 +1083,40 @@ export function PdfEditor({
         <ToolBtn icon={<Square />} label="Shapes" active={activeTool.startsWith("shape")} disabled={annotateDisabled} onClick={() => { setActiveTool("shape-rect"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<PenTool />} label="Sign" active={activeTool === "signature"} disabled={annotateDisabled} onClick={() => { setActiveTool("signature"); openSignature(); }} />
         
+        <Divider />
+        <button
+          onClick={() => rotatePage(current, 90)}
+          title="Rotate page"
+          aria-label="Rotate page"
+          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <RotateCw className="w-4 h-4" />
+          <span className="hidden md:inline">Rotate</span>
+        </button>
+        <button
+          onClick={() => duplicatePage(current)}
+          title="Duplicate page"
+          aria-label="Duplicate page"
+          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <Copy className="w-4 h-4" />
+          <span className="hidden md:inline">Duplicate</span>
+        </button>
+        <button
+          onClick={() => clearPage(pages[current]?.id)}
+          title="Clear page annotations"
+          aria-label="Clear page annotations"
+          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <Eraser className="w-4 h-4" />
+          <span className="hidden md:inline">Clear</span>
+        </button>
+        <button
+          onClick={() => extractPages([current])}
+          title="Extract current page"
+          aria-label="Extract current page"
+          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <Download className="w-4 h-4" />
+          <span className="hidden md:inline">Extract</span>
+        </button>
+
         {["draw", "shape-rect", "shape-ellipse", "shape-line", "text"].includes(activeTool) && (
           <div className="flex items-center gap-1.5 px-2">
             <Divider />
@@ -1250,10 +1235,10 @@ export function PdfEditor({
         </div>
       </div>
 
-      {isMobile && (showLeftSidebar || showRightSidebar) && (
+      {isMobile && showLeftSidebar && (
         <div
           className="fixed inset-0 bg-black/40 z-30 lg:hidden"
-          onClick={() => { setShowLeftSidebar(false); setShowRightSidebar(false); }}
+          onClick={() => setShowLeftSidebar(false)}
         />
       )}
 
@@ -1374,10 +1359,7 @@ export function PdfEditor({
         </AnimatePresence>
 
         <button
-          onClick={() => {
-            setShowLeftSidebar((s) => !s);
-            if (!showLeftSidebar && isMobile) setShowRightSidebar(false);
-          }}
+          onClick={() => setShowLeftSidebar((s) => !s)}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
           style={{ left: showLeftSidebar && !isMobile ? 200 : 0 }}
           title={showLeftSidebar ? "Hide pages panel" : "Show pages panel"}
@@ -1486,75 +1468,6 @@ export function PdfEditor({
             </button>
           </div>
         </main>
-
-        <button
-          onClick={() => {
-            setShowRightSidebar((s) => !s);
-            if (!showRightSidebar && isMobile) setShowLeftSidebar(false);
-          }}
-          className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
-          style={{ right: showRightSidebar && !isMobile ? 260 : 0 }}
-          title={showRightSidebar ? "Hide properties panel" : "Show properties panel"}
-          aria-label={showRightSidebar ? "Hide properties panel" : "Show properties panel"}
-        >
-          {showRightSidebar ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-        </button>
-
-        <AnimatePresence initial={false}>
-          {showRightSidebar && (
-            <motion.aside
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 260, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.18 }}
-              className={cn(
-                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
-                isMobile ? "fixed inset-y-0 right-0 z-40 shadow-xl max-w-[85vw]" : "border-l border-gray-200 dark:border-gray-800 z-10"
-              )}
-            >
-              <div className="flex-1 overflow-y-auto">
-                <ContextPropertiesPanel
-                  selectedElements={selectedElements}
-                  singleSelected={singleSelected}
-                  activeTool={activeTool}
-                  onUpdateElement={updateElement}
-                  onUpdateElements={(patch: Partial<AnyElement>) => updateElements(selectedIds, () => patch)}
-                  onDeleteElements={() => deleteElements(selectedIds)}
-                  onDuplicateElements={() => duplicateElements(selectedIds)}
-                  onImageReplace={() => imageInputRef.current?.click()}
-                  onBringToFront={() => reorderZ(selectedIds, "front")}
-                  onSendToBack={() => reorderZ(selectedIds, "back")}
-                  onRotatePage={() => rotatePage(current, 90)}
-                  onDuplicatePage={() => duplicatePage(current)}
-                  onExtractPage={() => extractPages([current])}
-                  onClearPage={() => clearPage(pages[current]?.id)}
-                  textPreviewFonts={textPreviewFonts}
-                  onSetPreviewFont={setPreviewFont}
-                />
-              </div>
-
-              <div className="p-3 border-t border-gray-200 dark:border-gray-800 shrink-0">
-                <Button
-                  onClick={apply}
-                  disabled={processing || busy}
-                  className="w-full h-11 rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm shadow-sm flex items-center justify-center gap-2"
-                >
-                  {processing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving…
-                    </>
-                  ) : (
-                    <>
-                      <span>{actionLabel || "Save changes"}</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
-                </Button>
-              </div>
-            </motion.aside>
-          )}
-        </AnimatePresence>
       </div>
 
       {signatureOpen && (
@@ -2811,241 +2724,6 @@ function AnnotationLayer(props: {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function ContextPropertiesPanel({
-  selectedElements,
-  singleSelected,
-  activeTool,
-  onUpdateElement,
-  onUpdateElements,
-  onDeleteElements,
-  onDuplicateElements,
-  onImageReplace,
-  onBringToFront,
-  onSendToBack,
-  onRotatePage,
-  onDuplicatePage,
-  onExtractPage,
-  onClearPage,
-  textPreviewFonts,
-  onSetPreviewFont,
-}: {
-  selectedElements: AnyElement[];
-  singleSelected: AnyElement | null;
-  activeTool: Tool;
-  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
-  onUpdateElements: (patch: Partial<AnyElement>) => void;
-  onDeleteElements: () => void;
-  onDuplicateElements: () => void;
-  onImageReplace: () => void;
-  onBringToFront: () => void;
-  onSendToBack: () => void;
-  onRotatePage: () => void;
-  onDuplicatePage: () => void;
-  onExtractPage: () => void;
-  onClearPage: () => void;
-  textPreviewFonts: Record<string, string>;
-  onSetPreviewFont: (id: string, family: string) => void;
-}) {
-  const colorSwatches = ["#000000", "#FFFFFF", "#DC2626", "#2563EB", "#16A34A", "#EAB308", "#9333EA", "#6B7280"];
-
-  if (selectedElements.length > 1) {
-    return (
-      <div className="p-4 space-y-5">
-        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-800 pb-2">
-          {selectedElements.length} elements selected
-        </h3>
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" size="sm" onClick={onDuplicateElements} className="rounded-md text-xs h-8"><Copy className="w-3.5 h-3.5 mr-1.5" /> Duplicate</Button>
-          <Button variant="outline" size="sm" onClick={onDeleteElements} className="rounded-md text-xs h-8 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"><Trash2 className="w-3.5 h-3.5 mr-1.5" /> Delete</Button>
-        </div>
-        <PropRow label="Layer order">
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={onBringToFront} className="rounded-md text-xs h-8">Bring forward</Button>
-            <Button variant="outline" size="sm" onClick={onSendToBack} className="rounded-md text-xs h-8">Send back</Button>
-          </div>
-        </PropRow>
-        <PropRow label="Opacity">
-          <input type="range" min={0.1} max={1} step={0.05} onChange={(e) => onUpdateElements({ opacity: Number(e.target.value) })} className="w-full accent-[#DC2626]" />
-        </PropRow>
-      </div>
-    );
-  }
-
-  if (singleSelected) {
-    const el = singleSelected;
-    const title =
-      el.type === "text" ? "Text" :
-      el.type === "image" ? "Image" :
-      el.type === "draw" ? "Drawing" :
-      el.type.startsWith("shape") || el.type === "rect" || el.type === "ellipse" || el.type === "line" ? "Shape" :
-      el.type === "sticky" ? "Sticky note" :
-      el.type === "highlight" || el.type === "underline" || el.type === "strikeout" || el.type === "squiggly" ? "Highlight" :
-      "Element";
-
-    return (
-      <div className="p-4 space-y-5">
-        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
-          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{title}</h3>
-          <div className="flex items-center gap-0.5">
-            <button onClick={onDuplicateElements} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400" title="Duplicate" aria-label="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
-            <button onClick={onDeleteElements} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-500 dark:text-gray-400 hover:text-red-600" title="Delete" aria-label="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
-          </div>
-        </div>
-
-        {el.type === "text" && (
-          <div className="space-y-4">
-            <div>
-              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Font style
-                <span className="ml-1 font-normal text-gray-400" title="Any font here previews on screen. The PDF font below controls what's embedded in your downloaded file.">
-                  ({FONT_PREVIEW_CHOICES.length}+ available)
-                </span>
-              </div>
-              <select
-                value={textPreviewFonts[el.id] || (el as TextElement).font}
-                onChange={(e) => onSetPreviewFont(el.id, e.target.value)}
-                className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-800 dark:text-gray-100 focus:outline-none focus:border-[#DC2626]"
-              >
-                <optgroup label="Standard">
-                  {SYSTEM_FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}
-                </optgroup>
-                <optgroup label="Google Fonts">
-                  {GOOGLE_FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}
-                </optgroup>
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <select
-                value={(el as TextElement).font}
-                onChange={(e) => onUpdateElement(el.id, { font: e.target.value as TextElement["font"] })}
-                title="PDF export font — the font actually embedded in the downloaded file"
-                className="flex-1 h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-800 dark:text-gray-100 focus:outline-none focus:border-[#DC2626]"
-              >
-                {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f === "TimesRoman" ? "Times New Roman" : f} (PDF)</option>)}
-              </select>
-              <input
-                type="number"
-                min={6} max={96}
-                value={(el as TextElement).fontSize}
-                onChange={(e) => onUpdateElement(el.id, { fontSize: Number(e.target.value) })}
-                className="w-14 h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center text-gray-800 dark:text-gray-100 focus:outline-none focus:border-[#DC2626]"
-              />
-            </div>
-            <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-800 p-1 rounded-md border border-gray-200 dark:border-gray-700">
-              <button onClick={() => onUpdateElement(el.id, { bold: !(el as TextElement).bold })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).bold ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500 dark:text-gray-400")}><Bold className="w-3.5 h-3.5" /></button>
-              <button onClick={() => onUpdateElement(el.id, { italic: !(el as TextElement).italic })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).italic ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500 dark:text-gray-400")}><Italic className="w-3.5 h-3.5" /></button>
-              <button onClick={() => onUpdateElement(el.id, { underline: !(el as TextElement).underline })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).underline ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500 dark:text-gray-400")}><UnderlineIcon className="w-3.5 h-3.5" /></button>
-            </div>
-            <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-800 p-1 rounded-md border border-gray-200 dark:border-gray-700">
-              <button onClick={() => onUpdateElement(el.id, { align: "left" })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).align === "left" ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500 dark:text-gray-400")}><AlignLeft className="w-3.5 h-3.5" /></button>
-              <button onClick={() => onUpdateElement(el.id, { align: "center" })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).align === "center" ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500 dark:text-gray-400")}><AlignCenter className="w-3.5 h-3.5" /></button>
-              <button onClick={() => onUpdateElement(el.id, { align: "right" })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).align === "right" ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500 dark:text-gray-400")}><AlignRight className="w-3.5 h-3.5" /></button>
-            </div>
-          </div>
-        )}
-
-        {el.type === "image" && (
-          <Button onClick={onImageReplace} variant="outline" className="w-full rounded-md text-xs h-8">Replace image</Button>
-        )}
-
-        {(el.type === "draw" || el.type === "rect" || el.type === "ellipse" || el.type === "line") && (
-          <div className="space-y-4">
-            <PropRow label="Stroke width">
-              <input type="number" min={1} max={20} value={(el as DrawElement | ShapeElement).strokeWidth} onChange={(e) => onUpdateElement(el.id, { strokeWidth: Number(e.target.value) })} className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs outline-none focus:border-[#DC2626] text-gray-800 dark:text-gray-100" />
-            </PropRow>
-            {(el.type === "rect" || el.type === "ellipse") && (
-              <PropRow label="Fill color">
-                <div className="flex items-center gap-2">
-                  <input type="color" value={(el as ShapeElement).fill ?? "#ffffff"} onChange={(e) => onUpdateElement(el.id, { fill: e.target.value })} className="w-8 h-8 rounded cursor-pointer border border-gray-200 dark:border-gray-700 p-0.5 bg-white dark:bg-gray-800" />
-                  <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-                    <input type="checkbox" checked={(el as ShapeElement).fill === null} onChange={(e) => onUpdateElement(el.id, { fill: e.target.checked ? null : "#ffffff" })} className="accent-[#DC2626]" /> No fill
-                  </label>
-                </div>
-              </PropRow>
-            )}
-          </div>
-        )}
-
-        {el.type !== "image" && (
-          <PropRow label="Color">
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={(el as TextElement).color || (el as ShapeElement).stroke || (el as HighlightElement).color || "#000000"}
-                onChange={(e) => {
-                  if (el.type === "text" || el.type.startsWith("field-") || el.type === "squiggly" || el.type === "strikeout" || el.type === "underline" || el.type === "highlight") {
-                    onUpdateElement(el.id, { color: e.target.value });
-                  } else {
-                    onUpdateElement(el.id, { stroke: e.target.value });
-                  }
-                }}
-                className="w-8 h-8 rounded-full cursor-pointer border border-gray-200 dark:border-gray-700 p-0.5 bg-white dark:bg-gray-800 shrink-0"
-              />
-              <div className="flex-1 flex flex-wrap gap-1.5">
-                {colorSwatches.map((color) => (
-                  <button
-                    key={color}
-                    onClick={() => {
-                      if (el.type === "text" || el.type.startsWith("field-") || el.type === "squiggly" || el.type === "strikeout" || el.type === "underline" || el.type === "highlight") {
-                        onUpdateElement(el.id, { color });
-                      } else {
-                        onUpdateElement(el.id, { stroke: color });
-                      }
-                    }}
-                    className="w-5 h-5 rounded-full border border-gray-200 dark:border-gray-700 hover:scale-110 transition-transform"
-                    style={{ background: color }}
-                    title={color}
-                  />
-                ))}
-              </div>
-            </div>
-          </PropRow>
-        )}
-
-        <PropRow label="Opacity">
-          <input type="range" min={0.1} max={1} step={0.05} value={el.opacity} onChange={(e) => onUpdateElement(el.id, { opacity: Number(e.target.value) })} className="w-full accent-[#DC2626]" />
-        </PropRow>
-
-        {el.type !== "draw" && el.type !== "sticky" && !el.type.startsWith("field-") && el.type !== "highlight" && el.type !== "underline" && el.type !== "strikeout" && el.type !== "squiggly" && (
-          <PropRow label="Rotation">
-            <div className="flex items-center gap-2">
-              <input type="range" min={0} max={359} value={el.rotation} onChange={(e) => onUpdateElement(el.id, { rotation: Number(e.target.value) })} className="flex-1 accent-[#DC2626]" />
-              <span className="text-xs text-gray-500 dark:text-gray-400 w-9 text-right tabular-nums">{el.rotation}°</span>
-            </div>
-          </PropRow>
-        )}
-
-        <PropRow label="Layer order">
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={onBringToFront} className="rounded-md text-xs h-8">Bring forward</Button>
-            <Button variant="outline" size="sm" onClick={onSendToBack} className="rounded-md text-xs h-8">Send back</Button>
-          </div>
-        </PropRow>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4 space-y-5">
-      <div>
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-1">Edit PDF</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-          Use the toolbar to add text, images, and annotations. Select any element on the page to edit its style here.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function PropRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{label}</div>
-      {children}
     </div>
   );
 }
