@@ -49,7 +49,6 @@ import {
   Underline as UnderlineIcon,
   Undo2,
   X,
-  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/download";
@@ -140,7 +139,7 @@ interface PdfEditorProps {
   onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
 }
 
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 100; // Increased to 100-step limit
 const NUDGE = 1;
 const NUDGE_FAST = 10;
 
@@ -270,6 +269,12 @@ export function PdfEditor({
   const [searchActiveIdx, setSearchActiveIdx] = useState(0);
   const [searching, setSearching] = useState(false);
   const textCacheRef = useRef<Record<number, string>>({});
+
+  // NEW: Determine which pages have active search results for thumbnail highlights
+  const searchMatchPages = useMemo(
+    () => new Set(searchResults.map((r) => r.pageIndex)),
+    [searchResults]
+  );
 
   const [signatureOpen, setSignatureOpen] = useState(false);
   const [signatureTab, setSignatureTab] = useState<"draw" | "type" | "saved">("draw");
@@ -1288,6 +1293,8 @@ export function PdfEditor({
                       "group relative rounded-md border p-1.5 transition-all cursor-pointer flex gap-2 items-center",
                       current === i
                         ? "border-[#DC2626] bg-red-50/60 dark:bg-red-900/20"
+                        : searchMatchPages.has(i)
+                        ? "border-[#DC2626]/50 bg-red-50/30 dark:bg-red-900/10"
                         : "border-transparent hover:bg-gray-50 dark:hover:bg-gray-800"
                     )}
                   >
@@ -1622,6 +1629,7 @@ function ToolBtn({
     </button>
   );
 }
+
 function Divider() {
   return <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />;
 }
