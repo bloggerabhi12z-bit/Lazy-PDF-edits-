@@ -49,6 +49,7 @@ import {
   Underline as UnderlineIcon,
   Undo2,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/download";
@@ -139,7 +140,7 @@ interface PdfEditorProps {
   onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
 }
 
-const MAX_HISTORY = 100; // Increased to 100-step limit
+const MAX_HISTORY = 50;
 const NUDGE = 1;
 const NUDGE_FAST = 10;
 
@@ -270,7 +271,6 @@ export function PdfEditor({
   const [searching, setSearching] = useState(false);
   const textCacheRef = useRef<Record<number, string>>({});
 
-  // NEW: Determine which pages have active search results for thumbnail highlights
   const searchMatchPages = useMemo(
     () => new Set(searchResults.map((r) => r.pageIndex)),
     [searchResults]
@@ -1492,7 +1492,7 @@ export function PdfEditor({
             setShowRightSidebar((s) => !s);
             if (!showRightSidebar && isMobile) setShowLeftSidebar(false);
           }}
-          className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-l-lg py-3 px-1.5 text-white shadow-md transition-colors"
+          className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
           style={{ right: showRightSidebar && !isMobile ? 260 : 0 }}
           title={showRightSidebar ? "Hide properties panel" : "Show properties panel"}
           aria-label={showRightSidebar ? "Hide properties panel" : "Show properties panel"}
@@ -3036,15 +3036,6 @@ function ContextPropertiesPanel({
         <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
           Use the toolbar to add text, images, and annotations. Select any element on the page to edit its style here.
         </p>
-      </div>
-      <div>
-        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Page actions</h4>
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          <Button variant="outline" size="sm" onClick={onRotatePage} className="rounded-md text-xs h-8"><RotateCw className="w-3.5 h-3.5 mr-1.5" /> Rotate</Button>
-          <Button variant="outline" size="sm" onClick={onDuplicatePage} className="rounded-md text-xs h-8"><Copy className="w-3.5 h-3.5 mr-1.5" /> Duplicate</Button>
-        </div>
-        <Button variant="outline" size="sm" onClick={onClearPage} className="w-full rounded-md text-xs h-8 mb-2 border-gray-300 text-gray-700 hover:bg-gray-50"><Eraser className="w-3.5 h-3.5 mr-1.5" /> Clear page annotations</Button>
-        <Button variant="outline" size="sm" onClick={onExtractPage} className="w-full rounded-md text-xs h-8"><Download className="w-3.5 h-3.5 mr-1.5" /> Extract current page</Button>
       </div>
     </div>
   );
