@@ -105,7 +105,7 @@ type PdfPage = {
 
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
 
-type Mode = "select" | "reorder" | "rotate";
+type Mode = "select" | "rotate";
 type Phase = "reading" | "rendering" | "ready" | "error";
 
 type Tool =
@@ -113,6 +113,7 @@ type Tool =
   | "hand"
   | "text"
   | "draw"
+  | "eraser"
   | "shape-rect"
   | "shape-ellipse"
   | "shape-line"
@@ -142,7 +143,6 @@ interface PdfEditorProps {
 const MAX_HISTORY = 50;
 const NUDGE = 1;
 const NUDGE_FAST = 10;
-const ACCENT = "#DC2626";
 
 const SYSTEM_FONT_FAMILIES = [
   "Helvetica", "Arial", "Times New Roman", "Georgia", "Courier New", "Verdana", 
@@ -161,6 +161,9 @@ const GOOGLE_FONT_FAMILIES = [
   "Great Vibes", "Shadows Into Light", "Indie Flower",
 ];
 const FONT_PREVIEW_CHOICES = [...SYSTEM_FONT_FAMILIES, ...GOOGLE_FONT_FAMILIES];
+
+const PALETTE = ["#111827", "#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#ec4899", "#ffffff"];
+const HIGHLIGHT_PALETTE = ["#fde047", "#86efac", "#93c5fd", "#fca5a5", "#f0abfc"];
 
 function fontFamilyStack(name: string): string {
   const serif = ["Times New Roman", "Georgia", "Palatino", "Garamond", "Book Antiqua", "Cambria", "Baskerville", "Didot", "PT Serif", "Merriweather", "Playfair Display", "Crimson Text", "Libre Baskerville", "EB Garamond", "Cormorant Garamond", "Bitter", "Zilla Slab", "IBM Plex Serif"];
@@ -195,21 +198,25 @@ export function PdfEditor({
 
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
   const [showRightSidebar, setShowRightSidebar] = useState<boolean>(true);
+  
   const [isMobile, setIsMobile] = useState(false);
 
-  // Auto-collapse sidebars on smaller screens initially
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setShowLeftSidebar(false);
-      setShowRightSidebar(false);
-    }
-  }, []);
+  const [brushColor, setBrushColor] = useState(PALETTE[1]);
+  const [highlightColor, setHighlightColor] = useState(HIGHLIGHT_PALETTE[0]);
+  const [brushSize, setBrushSize] = useState(3);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 1024);
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setShowLeftSidebar(false);
+      setShowRightSidebar(false);
+    }
   }, []);
 
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
@@ -477,10 +484,15 @@ export function PdfEditor({
     });
   }, []);
 
+  const clearPage = useCallback((pageId: string) => {
+    setElements((es) => es.filter((e) => e.pageId !== pageId));
+  }, []);
+
   const deleteSelectedPages = useCallback(() => {
     setPages((ps) => {
       const anySelected = ps.some((p) => p.selected);
-      if (!anySelected) return ps;
+      if (!anySelected) return ps; 
+      
       const remaining = ps.filter((p) => !p.selected);
       if (remaining.length === 0) {
         toast.error("Your PDF must contain at least one page.");
@@ -1111,8 +1123,70 @@ export function PdfEditor({
         <ToolBtn icon={<ImageIcon />} label="Image" active={activeTool === "image"} disabled={annotateDisabled} onClick={() => { setActiveTool("image"); imageInputRef.current?.click(); }} />
         <ToolBtn icon={<PenLine />} label="Draw" active={activeTool === "draw"} disabled={annotateDisabled} onClick={() => { setActiveTool("draw"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<Highlighter />} label="Highlight" active={activeTool === "highlight"} disabled={annotateDisabled} onClick={() => { setActiveTool("highlight"); setSelectedIds(new Set()); }} />
+        <ToolBtn icon={<Eraser />} label="Eraser" active={activeTool === "eraser"} disabled={annotateDisabled} onClick={() => { setActiveTool("eraser"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<Square />} label="Shapes" active={activeTool.startsWith("shape")} disabled={annotateDisabled} onClick={() => { setActiveTool("shape-rect"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<PenTool />} label="Sign" active={activeTool === "signature"} disabled={annotateDisabled} onClick={() => { setActiveTool("signature"); openSignature(); }} />
+        
+        {["draw", "shape-rect", "shape-ellipse", "shape-line", "text"].includes(activeTool) && (
+          <div className="flex items-center gap-1.5 px-2">
+            <Divider />
+            {PALETTE.map((c) => (
+              <button
+                key={c}
+                onClick={() => setBrushColor(c)}
+                style={{ backgroundColor: c }}
+                className={cn(
+                  "shrink-0 w-5 h-5 rounded-full border border-gray-200 dark:border-gray-700 transition-transform",
+                  brushColor === c && "ring-2 ring-[#DC2626] scale-110"
+                )}
+                title="Brush Color"
+                aria-label="Brush Color"
+              />
+            ))}
+            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
+            <input
+              type="range"
+              min={1}
+              max={24}
+              value={brushSize}
+              onChange={(e) => setBrushSize(Number(e.target.value))}
+              className="w-16 sm:w-24 accent-[#DC2626]"
+              title="Brush Size"
+              aria-label="Brush Size"
+            />
+          </div>
+        )}
+        
+        {activeTool === "highlight" && (
+          <div className="flex items-center gap-1.5 px-2">
+            <Divider />
+            {HIGHLIGHT_PALETTE.map((c) => (
+              <button
+                key={c}
+                onClick={() => setHighlightColor(c)}
+                style={{ backgroundColor: c }}
+                className={cn(
+                  "shrink-0 w-5 h-5 rounded-full border border-gray-200 dark:border-gray-700 transition-transform",
+                  highlightColor === c && "ring-2 ring-[#DC2626] scale-110"
+                )}
+                title="Highlight Color"
+                aria-label="Highlight Color"
+              />
+            ))}
+            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
+            <input
+              type="range"
+              min={1}
+              max={24}
+              value={brushSize}
+              onChange={(e) => setBrushSize(Number(e.target.value))}
+              className="w-16 sm:w-24 accent-[#DC2626]"
+              title="Brush Size"
+              aria-label="Brush Size"
+            />
+          </div>
+        )}
+
         <Divider />
         <div ref={moreBtnRef} className="relative shrink-0">
           <ToolBtn
@@ -1171,17 +1245,14 @@ export function PdfEditor({
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden relative">
-        {isMobile && (showLeftSidebar || showRightSidebar) && (
-          <div
-            className="fixed inset-0 bg-black/40 z-30"
-            onClick={() => {
-              setShowLeftSidebar(false);
-              setShowRightSidebar(false);
-            }}
-          />
-        )}
+      {isMobile && (showLeftSidebar || showRightSidebar) && (
+        <div
+          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
+          onClick={() => { setShowLeftSidebar(false); setShowRightSidebar(false); }}
+        />
+      )}
 
+      <div className="flex-1 flex overflow-hidden relative">
         <AnimatePresence initial={false}>
           {showLeftSidebar && (
             <motion.aside
@@ -1190,8 +1261,8 @@ export function PdfEditor({
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.18 }}
               className={cn(
-                "bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0",
-                isMobile ? "fixed inset-y-0 left-0 z-40 shadow-xl" : "z-10"
+                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
+                isMobile ? "fixed inset-y-0 left-0 z-40" : "border-r border-gray-200 dark:border-gray-800 z-10"
               )}
             >
               <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
@@ -1264,6 +1335,14 @@ export function PdfEditor({
                           <RotateCw className="h-3 w-3" />
                         </button>
                         <button
+                          onClick={(e: ReactMouseEvent) => { e.stopPropagation(); clearPage(p.id); }}
+                          className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100"
+                          title="Clear annotations"
+                          aria-label="Clear annotations"
+                        >
+                          <Eraser className="h-3 w-3" />
+                        </button>
+                        <button
                           onClick={(e: ReactMouseEvent) => { e.stopPropagation(); deletePage(i); }}
                           className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-600"
                           title="Delete page"
@@ -1288,7 +1367,10 @@ export function PdfEditor({
         </AnimatePresence>
 
         <button
-          onClick={() => setShowLeftSidebar((s) => !s)}
+          onClick={() => {
+            setShowLeftSidebar((s) => !s);
+            if (!showLeftSidebar && isMobile) setShowRightSidebar(false);
+          }}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
           style={{ left: showLeftSidebar && !isMobile ? 200 : 0 }}
           title={showLeftSidebar ? "Hide pages panel" : "Show pages panel"}
@@ -1323,9 +1405,13 @@ export function PdfEditor({
               onUpdateElement={updateElement}
               onUpdateElements={updateElements}
               onDuplicateElements={duplicateElements}
+              onDeleteElements={deleteElements}
               panStateRef={panStateRef}
               textPreviewFonts={textPreviewFonts}
               isMobile={isMobile}
+              brushColor={brushColor}
+              highlightColor={highlightColor}
+              brushSize={brushSize}
             />
           )}
 
@@ -1395,7 +1481,10 @@ export function PdfEditor({
         </main>
 
         <button
-          onClick={() => setShowRightSidebar((s) => !s)}
+          onClick={() => {
+            setShowRightSidebar((s) => !s);
+            if (!showRightSidebar && isMobile) setShowLeftSidebar(false);
+          }}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-l-lg py-3 px-1.5 text-white shadow-md transition-colors"
           style={{ right: showRightSidebar && !isMobile ? 260 : 0 }}
           title={showRightSidebar ? "Hide properties panel" : "Show properties panel"}
@@ -1412,8 +1501,8 @@ export function PdfEditor({
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.18 }}
               className={cn(
-                "bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 flex flex-col shrink-0",
-                isMobile ? "fixed inset-y-0 right-0 z-40 shadow-xl" : "z-10"
+                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
+                isMobile ? "fixed inset-y-0 right-0 z-40 shadow-xl max-w-[85vw]" : "border-l border-gray-200 dark:border-gray-800 z-10"
               )}
             >
               <div className="flex-1 overflow-y-auto">
@@ -1431,6 +1520,7 @@ export function PdfEditor({
                   onRotatePage={() => rotatePage(current, 90)}
                   onDuplicatePage={() => duplicatePage(current)}
                   onExtractPage={() => extractPages([current])}
+                  onClearPage={() => clearPage(pages[current]?.id)}
                   textPreviewFonts={textPreviewFonts}
                   onSetPreviewFont={setPreviewFont}
                 />
@@ -1555,6 +1645,7 @@ function PreviewCanvas(props: {
   onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
   onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
   onDuplicateElements: (ids: Set<string>) => void;
+  onDeleteElements: (ids: Set<string>) => void;
   panStateRef: React.MutableRefObject<{
     startX: number;
     startY: number;
@@ -1564,6 +1655,9 @@ function PreviewCanvas(props: {
   } | null>;
   textPreviewFonts: Record<string, string>;
   isMobile: boolean;
+  brushColor: string;
+  highlightColor: string;
+  brushSize: number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
@@ -1603,7 +1697,7 @@ function PreviewCanvas(props: {
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
         if (topEntry) {
-          const idx = parseInt(topEntry.getAttribute("data-page-index") || "-1", 10);
+          const idx = parseInt(topEntry.target.getAttribute("data-page-index") || "-1", 10);
           if (idx >= 0) props.onCurrentChange(idx);
         }
       },
@@ -1611,7 +1705,7 @@ function PreviewCanvas(props: {
     );
     items.forEach((it) => io.observe(it));
     return () => io.disconnect();
-  }, [props.pages, props.onCurrentChange]);
+  }, [props.pages.length, props.onCurrentChange]);
 
   function onContainerPointerDown(e: ReactPointerEvent) {
     if (props.activeTool !== "hand") return;
@@ -1676,8 +1770,12 @@ function PreviewCanvas(props: {
             onUpdateElement={props.onUpdateElement}
             onUpdateElements={props.onUpdateElements}
             onDuplicateElements={props.onDuplicateElements}
+            onDeleteElements={props.onDeleteElements}
             textPreviewFonts={props.textPreviewFonts}
             isMobile={props.isMobile}
+            brushColor={props.brushColor}
+            highlightColor={props.highlightColor}
+            brushSize={props.brushSize}
           />
         ))}
       </div>
@@ -1707,8 +1805,12 @@ function PagePane(props: {
   onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
   onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
   onDuplicateElements: (ids: Set<string>) => void;
+  onDeleteElements: (ids: Set<string>) => void;
   textPreviewFonts: Record<string, string>;
   isMobile: boolean;
+  brushColor: string;
+  highlightColor: string;
+  brushSize: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -1821,9 +1923,13 @@ function PagePane(props: {
           onUpdateElement={props.onUpdateElement}
           onUpdateElements={props.onUpdateElements}
           onDuplicateElements={props.onDuplicateElements}
+          onDeleteElements={props.onDeleteElements}
           interactive={props.activeTool !== "hand"}
           textPreviewFonts={props.textPreviewFonts}
           isMobile={props.isMobile}
+          brushColor={props.brushColor}
+          highlightColor={props.highlightColor}
+          brushSize={props.brushSize}
         />
       )}
     </div>
@@ -1852,15 +1958,19 @@ function AnnotationLayer(props: {
   onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
   onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
   onDuplicateElements: (ids: Set<string>) => void;
+  onDeleteElements: (ids: Set<string>) => void;
   interactive: boolean;
   textPreviewFonts: Record<string, string>;
   isMobile: boolean;
+  brushColor: string;
+  highlightColor: string;
+  brushSize: number;
 }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [drawPoints, setDrawPoints] = useState<{ x: number; y: number }[] | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const dragStateRef = useRef<{ startPt: { x: number; y: number } } | null>(null);
+  const dragStateRef = useRef<{ startPt?: { x: number; y: number }, isErasing?: boolean } | null>(null);
   const moveStateRef = useRef<{ ids: string[]; offsets: Record<string, { x: number; y: number }> } | null>(null);
   const resizeStateRef = useRef<{ id: string; startW: number; startH: number } | null>(null);
   const rotateStateRef = useRef<{
@@ -1871,9 +1981,6 @@ function AnnotationLayer(props: {
     startRotation: number;
   } | null>(null);
 
-  const handleSize = props.isMobile ? 22 : 10;
-  const rotateHandleTop = props.isMobile ? -30 : -22;
-
   const toPt = useCallback(
     (clientX: number, clientY: number) => {
       const rect = layerRef.current!.getBoundingClientRect();
@@ -1881,6 +1988,23 @@ function AnnotationLayer(props: {
     },
     [props.scale]
   );
+
+  const eraseAt = (x: number, y: number) => {
+    const r = 15 / props.scale; 
+    const hits = new Set<string>();
+    props.elements.forEach(el => {
+      if (el.type === 'draw' || el.type === 'squiggly') {
+        const d = el as DrawElement;
+        const hasHit = (d.points || []).some((p) => Math.hypot((d.x + p.x) - x, (d.y + p.y) - y) < r);
+        if (hasHit) hits.add(el.id);
+      } else {
+        if (x >= el.x - r && x <= el.x + el.width + r && y >= el.y - r && y <= el.y + el.height + r) {
+          hits.add(el.id);
+        }
+      }
+    });
+    if (hits.size > 0) props.onDeleteElements(hits);
+  };
 
   const nonCreationTools: Tool[] = ["select", "hand", "image", "signature"];
   const isCreationTool = props.interactive && !nonCreationTools.includes(props.activeTool);
@@ -1936,6 +2060,30 @@ function AnnotationLayer(props: {
 
   function onLayerPointerDown(e: ReactPointerEvent) {
     if (!props.interactive) return;
+
+    const pt = toPt(e.clientX, e.clientY);
+
+    if (props.activeTool === "eraser") {
+      dragStateRef.current = { isErasing: true };
+      eraseAt(pt.x, pt.y);
+      function onMove(ev: PointerEvent) {
+        if (dragStateRef.current?.isErasing) {
+          const p = toPt(ev.clientX, ev.clientY);
+          eraseAt(p.x, p.y);
+        }
+      }
+      function onUp() {
+        dragStateRef.current = null;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+      return;
+    }
+
     if (!isCreationTool) {
       if (e.target === layerRef.current) {
         if (e.shiftKey || e.metaKey || e.ctrlKey) return;
@@ -1977,8 +2125,6 @@ function AnnotationLayer(props: {
       return;
     }
 
-    const pt = toPt(e.clientX, e.clientY);
-
     if (props.activeTool === "text") {
       props.onAddElement({
         id: makeId("txt"),
@@ -1992,11 +2138,11 @@ function AnnotationLayer(props: {
         rotation: 0,
         text: "Click to edit text",
         font: "Helvetica",
-        fontSize: 14,
+        fontSize: Math.max(14, props.brushSize * 4),
         bold: false,
         italic: false,
         underline: false,
-        color: "#111827",
+        color: props.brushColor,
         align: "left",
         letterSpacing: 0,
         lineSpacing: 1.25,
@@ -2035,12 +2181,14 @@ function AnnotationLayer(props: {
         setDrawPoints((pts) => (pts ? [...pts, p] : [p]));
       } else {
         const start = dragStateRef.current!.startPt;
-        setDraft({
-          x: Math.min(start.x, p.x),
-          y: Math.min(start.y, p.y),
-          w: Math.abs(p.x - start.x),
-          h: Math.abs(p.y - start.y),
-        });
+        if (start) {
+          setDraft({
+            x: Math.min(start.x, p.x),
+            y: Math.min(start.y, p.y),
+            w: Math.abs(p.x - start.x),
+            h: Math.abs(p.y - start.y),
+          });
+        }
       }
     }
     function onUp(ev: PointerEvent) {
@@ -2070,8 +2218,8 @@ function AnnotationLayer(props: {
               height: Math.max(1, maxY - minY),
               opacity: 1,
               rotation: 0,
-              stroke: "#DC2626",
-              strokeWidth: 2,
+              stroke: props.brushColor,
+              strokeWidth: props.brushSize,
               points: pts.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })),
             } as DrawElement);
           }
@@ -2106,8 +2254,8 @@ function AnnotationLayer(props: {
           height: h,
           opacity: 1,
           rotation: 0,
-          stroke: "#DC2626",
-          strokeWidth: 2,
+          stroke: props.brushColor,
+          strokeWidth: props.brushSize,
           fill: null,
         } as ShapeElement);
       } else if (
@@ -2126,7 +2274,7 @@ function AnnotationLayer(props: {
           height: h,
           opacity: props.activeTool === "highlight" ? 0.35 : 1,
           rotation: 0,
-          color: "#FDE047",
+          color: props.activeTool === "highlight" ? props.highlightColor : "#FDE047",
         } as HighlightElement);
       } else if (props.activeTool === "whiteout") {
         props.onAddElement({
@@ -2254,6 +2402,9 @@ function AnnotationLayer(props: {
     window.addEventListener("pointercancel", onUp);
   }
 
+  const handleSize = props.isMobile ? 22 : 10;
+  const rotateHandleTop = props.isMobile ? -30 : -22;
+
   return (
     <div
       ref={layerRef}
@@ -2261,7 +2412,7 @@ function AnnotationLayer(props: {
       style={{
         cursor: isCreationTool ? "crosshair" : props.activeTool === "hand" ? undefined : "default",
         pointerEvents: props.interactive ? "auto" : "none",
-        touchAction: isCreationTool ? "none" : "auto", 
+        touchAction: isCreationTool || props.activeTool === "eraser" ? "none" : "auto", 
       }}
       onPointerDown={onLayerPointerDown}
     >
@@ -2631,8 +2782,8 @@ function AnnotationLayer(props: {
           <polyline
             points={drawPoints.map((p) => `${p.x * props.scale},${p.y * props.scale}`).join(" ")}
             fill="none"
-            stroke="#DC2626"
-            strokeWidth={2}
+            stroke={props.brushColor}
+            strokeWidth={props.brushSize}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -2670,6 +2821,7 @@ function ContextPropertiesPanel({
   onRotatePage,
   onDuplicatePage,
   onExtractPage,
+  onClearPage,
   textPreviewFonts,
   onSetPreviewFont,
 }: {
@@ -2686,6 +2838,7 @@ function ContextPropertiesPanel({
   onRotatePage: () => void;
   onDuplicatePage: () => void;
   onExtractPage: () => void;
+  onClearPage: () => void;
   textPreviewFonts: Record<string, string>;
   onSetPreviewFont: (id: string, family: string) => void;
 }) {
@@ -2882,6 +3035,7 @@ function ContextPropertiesPanel({
           <Button variant="outline" size="sm" onClick={onRotatePage} className="rounded-md text-xs h-8"><RotateCw className="w-3.5 h-3.5 mr-1.5" /> Rotate</Button>
           <Button variant="outline" size="sm" onClick={onDuplicatePage} className="rounded-md text-xs h-8"><Copy className="w-3.5 h-3.5 mr-1.5" /> Duplicate</Button>
         </div>
+        <Button variant="outline" size="sm" onClick={onClearPage} className="w-full rounded-md text-xs h-8 mb-2 border-gray-300 text-gray-700 hover:bg-gray-50"><Eraser className="w-3.5 h-3.5 mr-1.5" /> Clear page annotations</Button>
         <Button variant="outline" size="sm" onClick={onExtractPage} className="w-full rounded-md text-xs h-8"><Download className="w-3.5 h-3.5 mr-1.5" /> Extract current page</Button>
       </div>
     </div>
@@ -2928,24 +3082,21 @@ function SignatureModal({
   onUseSaved: (src: string) => void;
   onDeleteSaved: (id: string) => void;
 }) {
-  function getScaledPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY,
-    };
-  }
+  
   function startDraw(e: ReactPointerEvent<HTMLCanvasElement>) {
     drawingRef.current = true;
     draw(e);
   }
+  
   function draw(e: ReactPointerEvent<HTMLCanvasElement>) {
     if (!drawingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const { x, y } = getScaledPoint(canvas, e.clientX, e.clientY);
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.fillStyle = "#111827";
@@ -2960,6 +3111,7 @@ function SignatureModal({
     ctx.beginPath();
     ctx.moveTo(x, y);
   }
+
   function endDraw() {
     drawingRef.current = false;
   }
