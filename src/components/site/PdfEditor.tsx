@@ -105,7 +105,7 @@ type PdfPage = {
 
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
 
-type Mode = "select" | "rotate";
+type Mode = "select" | "reorder" | "rotate";
 type Phase = "reading" | "rendering" | "ready" | "error";
 
 type Tool =
@@ -195,21 +195,21 @@ export function PdfEditor({
 
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
   const [showRightSidebar, setShowRightSidebar] = useState<boolean>(true);
-  
   const [isMobile, setIsMobile] = useState(false);
+
+  // Auto-collapse sidebars on smaller screens initially
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setShowLeftSidebar(false);
+      setShowRightSidebar(false);
+    }
+  }, []);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 1024);
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setShowLeftSidebar(false);
-      setShowRightSidebar(false);
-    }
   }, []);
 
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
@@ -480,8 +480,7 @@ export function PdfEditor({
   const deleteSelectedPages = useCallback(() => {
     setPages((ps) => {
       const anySelected = ps.some((p) => p.selected);
-      if (!anySelected) return ps; 
-      
+      if (!anySelected) return ps;
       const remaining = ps.filter((p) => !p.selected);
       if (remaining.length === 0) {
         toast.error("Your PDF must contain at least one page.");
@@ -1172,14 +1171,17 @@ export function PdfEditor({
         </div>
       </div>
 
-      {isMobile && (showLeftSidebar || showRightSidebar) && (
-        <div
-          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
-          onClick={() => { setShowLeftSidebar(false); setShowRightSidebar(false); }}
-        />
-      )}
-
       <div className="flex-1 flex overflow-hidden relative">
+        {isMobile && (showLeftSidebar || showRightSidebar) && (
+          <div
+            className="fixed inset-0 bg-black/40 z-30"
+            onClick={() => {
+              setShowLeftSidebar(false);
+              setShowRightSidebar(false);
+            }}
+          />
+        )}
+
         <AnimatePresence initial={false}>
           {showLeftSidebar && (
             <motion.aside
@@ -1188,8 +1190,8 @@ export function PdfEditor({
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.18 }}
               className={cn(
-                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
-                isMobile ? "fixed inset-y-0 left-0 z-40" : "border-r border-gray-200 dark:border-gray-800 z-10"
+                "bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0",
+                isMobile ? "fixed inset-y-0 left-0 z-40 shadow-xl" : "z-10"
               )}
             >
               <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
@@ -1288,7 +1290,7 @@ export function PdfEditor({
         <button
           onClick={() => setShowLeftSidebar((s) => !s)}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
-          style={{ left: showLeftSidebar ? 200 : 0 }}
+          style={{ left: showLeftSidebar && !isMobile ? 200 : 0 }}
           title={showLeftSidebar ? "Hide pages panel" : "Show pages panel"}
           aria-label={showLeftSidebar ? "Hide pages panel" : "Show pages panel"}
         >
@@ -1395,7 +1397,7 @@ export function PdfEditor({
         <button
           onClick={() => setShowRightSidebar((s) => !s)}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-l-lg py-3 px-1.5 text-white shadow-md transition-colors"
-          style={{ right: showRightSidebar ? 260 : 0 }}
+          style={{ right: showRightSidebar && !isMobile ? 260 : 0 }}
           title={showRightSidebar ? "Hide properties panel" : "Show properties panel"}
           aria-label={showRightSidebar ? "Hide properties panel" : "Show properties panel"}
         >
@@ -1410,8 +1412,8 @@ export function PdfEditor({
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.18 }}
               className={cn(
-                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
-                isMobile ? "fixed inset-y-0 right-0 z-40" : "border-l border-gray-200 dark:border-gray-800 z-10"
+                "bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 flex flex-col shrink-0",
+                isMobile ? "fixed inset-y-0 right-0 z-40 shadow-xl" : "z-10"
               )}
             >
               <div className="flex-1 overflow-y-auto">
@@ -1601,7 +1603,7 @@ function PreviewCanvas(props: {
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
         if (topEntry) {
-          const idx = parseInt(topEntry.target.getAttribute("data-page-index") || "-1", 10);
+          const idx = parseInt(topEntry.getAttribute("data-page-index") || "-1", 10);
           if (idx >= 0) props.onCurrentChange(idx);
         }
       },
@@ -1609,7 +1611,7 @@ function PreviewCanvas(props: {
     );
     items.forEach((it) => io.observe(it));
     return () => io.disconnect();
-  }, [props.pages.length, props.onCurrentChange]);
+  }, [props.pages, props.onCurrentChange]);
 
   function onContainerPointerDown(e: ReactPointerEvent) {
     if (props.activeTool !== "hand") return;
@@ -1868,6 +1870,9 @@ function AnnotationLayer(props: {
     startAngle: number;
     startRotation: number;
   } | null>(null);
+
+  const handleSize = props.isMobile ? 22 : 10;
+  const rotateHandleTop = props.isMobile ? -30 : -22;
 
   const toPt = useCallback(
     (clientX: number, clientY: number) => {
@@ -2249,9 +2254,6 @@ function AnnotationLayer(props: {
     window.addEventListener("pointercancel", onUp);
   }
 
-  const handleSize = props.isMobile ? 22 : 10;
-  const handleOffset = -(handleSize / 2);
-
   return (
     <div
       ref={layerRef}
@@ -2577,8 +2579,8 @@ function AnnotationLayer(props: {
                   onPointerDown={(e) => startResize(e, el)}
                   style={{
                     position: "absolute",
-                    right: handleOffset,
-                    bottom: handleOffset,
+                    right: -handleSize / 2,
+                    bottom: -handleSize / 2,
                     width: handleSize,
                     height: handleSize,
                     borderRadius: 3,
@@ -2594,10 +2596,10 @@ function AnnotationLayer(props: {
                 style={{
                   position: "absolute",
                   left: "50%",
-                  top: -22,
+                  top: rotateHandleTop,
                   width: handleSize,
                   height: handleSize,
-                  marginLeft: handleOffset,
+                  marginLeft: -handleSize / 2,
                   borderRadius: "50%",
                   background: "#DC2626",
                   cursor: "grab",
@@ -2926,21 +2928,24 @@ function SignatureModal({
   onUseSaved: (src: string) => void;
   onDeleteSaved: (id: string) => void;
 }) {
-  
+  function getScaledPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }
   function startDraw(e: ReactPointerEvent<HTMLCanvasElement>) {
     drawingRef.current = true;
     draw(e);
   }
-  
   function draw(e: ReactPointerEvent<HTMLCanvasElement>) {
     if (!drawingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const { x, y } = getScaledPoint(canvas, e.clientX, e.clientY);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.fillStyle = "#111827";
@@ -2955,7 +2960,6 @@ function SignatureModal({
     ctx.beginPath();
     ctx.moveTo(x, y);
   }
-
   function endDraw() {
     drawingRef.current = false;
   }
