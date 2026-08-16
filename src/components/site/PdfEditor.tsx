@@ -196,6 +196,7 @@ export function PdfEditor({
   const [activeTool, setActiveTool] = useState<Tool>("select");
 
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
+  const [showRightSidebar, setShowRightSidebar] = useState<boolean>(true);
   
   const [isMobile, setIsMobile] = useState(false);
 
@@ -213,12 +214,23 @@ export function PdfEditor({
   useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setShowLeftSidebar(false);
+      setShowRightSidebar(false);
     }
   }, []);
 
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
   const loadedGoogleFontsRef = useRef<Set<string>>(new Set());
 
+  const setPreviewFont = useCallback((id: string, family: string) => {
+    setTextPreviewFonts((m) => ({ ...m, [id]: family }));
+    if (GOOGLE_FONT_FAMILIES.includes(family) && !loadedGoogleFontsRef.current.has(family)) {
+      loadedGoogleFontsRef.current.add(family);
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, "+")}:wght@400;700&display=swap`;
+      document.head.appendChild(link);
+    }
+  }, []);
   const [showMoreTools, setShowMoreTools] = useState(false);
   const [moreToolsPos, setMoreToolsPos] = useState<{ top: number; left: number } | null>(null);
   const moreBtnRef = useRef<HTMLDivElement | null>(null);
@@ -583,6 +595,42 @@ export function PdfEditor({
       return [...es, ...clones];
     });
   }, []);
+
+  const reorderZ = useCallback(
+    (ids: Set<string>, direction: "forward" | "backward" | "front" | "back") => {
+      setElements((es) => {
+        const next = [...es];
+        const indices = next.map((e, i) => (ids.has(e.id) ? i : -1)).filter((i) => i >= 0);
+        if (indices.length === 0) return es;
+        if (direction === "front") {
+          const items = indices.map((i) => next[i]);
+          const rest = next.filter((_, i) => !indices.includes(i));
+          return [...rest, ...items];
+        }
+        if (direction === "back") {
+          const items = indices.map((i) => next[i]);
+          const rest = next.filter((_, i) => !indices.includes(i));
+          return [...items, ...rest];
+        }
+        const step = direction === "forward" ? 1 : -1;
+        const order = direction === "forward" ? [...indices].reverse() : indices;
+        for (const i of order) {
+          const j = i + step;
+          if (j < 0 || j >= next.length) continue;
+          if (ids.has(next[j].id)) continue;
+          [next[i], next[j]] = [next[j], next[i]];
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const selectedElements = useMemo(
+    () => elements.filter((e) => selectedIds.has(e.id)),
+    [elements, selectedIds]
+  );
+  const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null;
 
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
@@ -1252,7 +1300,7 @@ export function PdfEditor({
               transition={{ duration: 0.18 }}
               className={cn(
                 "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
-                isMobile ? "fixed inset-y-0 left-0 z-40" : "border-r border-gray-200 dark:border-gray-800 z-10"
+                isMobile ? "fixed inset-y-0 left-0 z-40 shadow-xl" : "border-r border-gray-200 dark:border-gray-800 z-10"
               )}
             >
               <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
@@ -2093,6 +2141,7 @@ function AnnotationLayer(props: {
     }
 
     dragStateRef.current = { startPt: pt };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
     if (props.activeTool === "draw") setDrawPoints([pt]);
     else setDraft({ x: pt.x, y: pt.y, w: 0, h: 0 });
 
@@ -2116,6 +2165,7 @@ function AnnotationLayer(props: {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
+      (e.target as Element).releasePointerCapture?.(e.pointerId);
       const p = toPt(ev.clientX, ev.clientY);
       const start = dragStateRef.current?.startPt ?? p;
       dragStateRef.current = null;
@@ -2359,9 +2409,22 @@ function AnnotationLayer(props: {
         let body: React.ReactNode = null;
         if (el.type === "text") {
           const t = el as TextElement;
+          const isEditable = selected && props.activeTool === "select" && props.selectedIds.size === 1;
           body = (
             <div
-              contentEditable={selected && props.activeTool === "select" && props.selectedIds.size === 1}
+              ref={(node) => {
+                if (node && isEditable && t.text === "Click to edit text") {
+                  requestAnimationFrame(() => {
+                    node.focus();
+                    const range = document.createRange();
+                    range.selectNodeContents(node);
+                    const sel = window.getSelection();
+                    sel?.removeAllRanges();
+                    sel?.addRange(range);
+                  });
+                }
+              }}
+              contentEditable={isEditable}
               suppressContentEditableWarning
               onBlur={(e2) => props.onUpdateElement(el.id, { text: e2.currentTarget.textContent || "" })}
               style={{
