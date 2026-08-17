@@ -107,30 +107,33 @@ export function ImagesToPdfTool({
       />
       
       {items.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-          <div className="text-sm font-medium text-muted-foreground mb-2 flex justify-between items-center">
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-4 shadow-sm">
+          <div className="text-base font-medium text-muted-foreground flex justify-between items-center px-1">
             <span>{items.length} image{items.length > 1 ? "s" : ""} selected</span>
-            <span className="text-xs">Use arrows to reorder</span>
+            <span className="text-sm">Use arrows to reorder</span>
           </div>
           
-          <div className="max-h-80 overflow-y-auto space-y-2 pr-2">
+          {/* Increased max-height to 60vh to show more items, increased spacing */}
+          <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-2">
             {items.map((item, i) => (
-              <div key={item.id} className="flex items-center gap-3 bg-secondary/30 border border-border p-2 rounded-lg transition-colors hover:bg-secondary/50">
-                <img src={item.url} alt="thumbnail" className="w-14 h-14 object-cover rounded bg-white shadow-sm" />
-                <span className="flex-1 truncate text-sm font-medium text-foreground" title={item.file.name}>
+              <div key={item.id} className="flex items-center gap-4 bg-secondary/30 border border-border p-3 rounded-lg transition-colors hover:bg-secondary/50">
+                {/* Increased thumbnail size from w-14 to w-24 */}
+                <img src={item.url} alt="thumbnail" className="w-24 h-24 object-cover rounded bg-white shadow-sm" />
+                <span className="flex-1 truncate text-base font-medium text-foreground" title={item.file.name}>
                   {item.file.name}
                 </span>
                 
+                {/* Increased button and icon sizes for better click targets */}
                 <div className="flex items-center gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0}>
-                    <ChevronUp className="h-4 w-4" />
+                  <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0}>
+                    <ChevronUp className="h-5 w-5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1}>
-                    <ChevronDown className="h-4 w-4" />
+                  <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1}>
+                    <ChevronDown className="h-5 w-5" />
                   </Button>
-                  <div className="w-px h-5 bg-border mx-1" />
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)}>
-                    <X className="h-4 w-4" />
+                  <div className="w-px h-6 bg-border mx-2" />
+                  <Button variant="ghost" size="icon" className="h-10 w-10 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)}>
+                    <X className="h-5 w-5" />
                   </Button>
                 </div>
               </div>
