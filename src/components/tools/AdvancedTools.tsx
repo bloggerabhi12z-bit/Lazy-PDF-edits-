@@ -222,6 +222,11 @@ function truncateToWidth(
   return `${t}…`;
 }
 
+/**
+ * Built-in PDF fonts use WinAnsi and throw for characters outside that
+ * encoding. Preserve a readable approximation so one cell cannot abort the
+ * entire workbook conversion.
+ */
 function toPdfSafeText(value: string) {
   return value
     .replace(/[\u2018\u2019]/g, "'")
@@ -309,6 +314,16 @@ async function renderSpreadsheetPdf(sheets: Array<{ heading: string; rows: strin
 }
 
 /* -------------------------- HTML → PDF visual renderer -------------------------- */
+/**
+ * Renders arbitrary HTML into a real, paginated, visually-styled PDF using
+ * html2canvas (renders the DOM as-is: bold, headings, colors, tables,
+ * images) + pdf-lib (slices the tall render into A4 pages and embeds each
+ * slice as a PNG). Requires: npm install html2canvas
+ *
+ * This replaces the old approach of stripping HTML to plain text — layout,
+ * formatting, and images are now preserved because the actual rendered DOM
+ * is captured rather than discarded.
+ */
 async function renderHtmlToPdfBlob(html: string) {
   const html2canvasModule = await import("html2canvas");
   const html2canvas = html2canvasModule.default;
@@ -525,19 +540,89 @@ export function ExtractImagesTool() {
   return <PdfToImagesTool type="png" />;
 }
 
-// ----------------------------------------------------------------------
-// NEW FEATURE: Accepts ANY image format and allows drag/reordering
-// ----------------------------------------------------------------------
 export function ScanToPdfTool() {
   return (
     <ImagesToPdfCaptureTool
-      accept={{
-        "image/*": [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".gif"]
-      }}
+      accept={{ "image/*": [] }}
       hint="Upload scans, camera photos, or any images. On mobile, choose your camera."
       filename="lazy-pdf-scan.pdf"
     />
   );
+}
+
+const MAX_IMAGE_DIMENSION = 6000; // clamp absurdly large images to avoid canvas/memory crashes
+
+type ProcessedImage = {
+  bytes: Uint8Array;
+  type: "png" | "jpg";
+  width: number;
+  height: number;
+};
+
+/** 
+ * Converts any browser-decodable image (webp, gif, bmp, tiff, svg, heic where 
+ * supported, etc.) into PNG or JPEG bytes pdf-lib can embed. PNG/JPEG files 
+ * are passed through unchanged to avoid a needless re-encode. Uses 
+ * createImageBitmap with EXIF-aware orientation where the browser supports it. 
+ */
+async function processImageForPdf(file: File): Promise<ProcessedImage> {
+  const lower = file.name.toLowerCase();
+  const isPng = file.type === "image/png" || lower.endsWith(".png");
+  const isJpg =
+    file.type === "image/jpeg" ||
+    file.type === "image/jpg" ||
+    lower.endsWith(".jpg") ||
+    lower.endsWith(".jpeg");
+
+  // Fast path: already a directly-embeddable format.
+  if (isPng || isJpg) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // Still need dimensions for page sizing; decode once cheaply.
+    const bitmap = await createImageBitmap(file).catch(() => null);
+    if (!bitmap) throw new Error(`Could not read "${file.name}" — the file may be corrupted.`);
+    const { width, height } = bitmap;
+    bitmap.close?.();
+    return { bytes, type: isPng ? "png" : "jpg", width, height };
+  }
+
+  // Everything else: decode via createImageBitmap (covers webp, gif, bmp, 
+  // most tiff, and heic/heif on browsers that support it) then re-encode.
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" } as ImageBitmapOptions);
+  } catch {
+    // Some browsers don't support imageOrientation option; retry without it.
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      throw new Error(
+        `"${file.name}" is not a supported image format in this browser.`,
+      );
+    }
+  }
+
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const targetW = Math.max(1, Math.round(bitmap.width * scale));
+  const targetH = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas rendering is not available in this browser.");
+  ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+  bitmap.close?.();
+
+  // PNG preserves transparency; use it unless the source is a photographic 
+  // format where PNG would bloat the file size unnecessarily.
+  const preferPng = file.type === "image/gif" || file.type === "image/bmp" || file.type === "image/webp";
+  const outType: "png" | "jpg" = preferPng ? "png" : "jpg";
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, outType === "png" ? "image/png" : "image/jpeg", 0.92),
+  );
+  if (!blob) throw new Error(`Could not convert "${file.name}".`);
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return { bytes, type: outType, width: targetW, height: targetH };
 }
 
 function ImagesToPdfCaptureTool({
@@ -551,19 +636,20 @@ function ImagesToPdfCaptureTool({
 }) {
   const [items, setItems] = useState<{ id: string; file: File; url: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const dragIndexRef = useState<{ current: number | null }>({ current: null })[0];
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
-  // Clean up object URLs to prevent memory leaks when components unmount
   useEffect(() => {
     return () => {
-      items.forEach(item => URL.revokeObjectURL(item.url));
+      items.forEach((item) => URL.revokeObjectURL(item.url));
     };
   }, [items]);
 
   function addFiles(newFiles: File[]) {
-    const mapped = newFiles.map(file => ({
+    const mapped = newFiles.map((file) => ({
       id: Math.random().toString(36).substring(7),
       file,
-      url: URL.createObjectURL(file) 
+      url: URL.createObjectURL(file),
     }));
     setItems((current) => [...current, ...mapped]);
   }
@@ -587,48 +673,65 @@ function ImagesToPdfCaptureTool({
     setItems(items.filter((_, i) => i !== index));
   }
 
+  function onDragStart(index: number) {
+    dragIndexRef.current = index;
+  }
+  function onDragOver(index: number, e: React.DragEvent) {
+    e.preventDefault();
+    setDragOverIndex(index);
+  }
+  function onDrop(index: number) {
+    const from = dragIndexRef.current;
+    setDragOverIndex(null);
+    dragIndexRef.current = null;
+    if (from === null || from === index) return;
+    setItems((current) => {
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(index, 0, moved);
+      return next;
+    });
+  }
+
   async function run() {
     if (!items.length) return;
     setBusy(true);
+    const failures: string[] = [];
     try {
       const doc = await PDFDocument.create();
+      let addedAny = false;
+
       for (const item of items) {
-        const { file } = item;
-        
-        const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-        const isJpg = file.type === "image/jpeg" || file.type === "image/jpg" || file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg");
-
-        let imageBytes: Uint8Array;
-        let type: "png" | "jpg" = "jpg";
-
-        // If it's a native format supported by pdf-lib, use raw bytes directly
-        if (isPng || isJpg) {
-          imageBytes = new Uint8Array(await file.arrayBuffer());
-          type = isPng ? "png" : "jpg";
-        } else {
-          // If it's WebP, BMP, GIF, HEIC etc., draw it to a canvas and convert to JPEG
-          const bmp = await createImageBitmap(file);
-          const cvs = document.createElement("canvas");
-          cvs.width = bmp.width;
-          cvs.height = bmp.height;
-          const ctx = cvs.getContext("2d");
-          if (!ctx) throw new Error("Canvas rendering not supported");
-          ctx.drawImage(bmp, 0, 0);
-          
-          const blob = await new Promise<Blob | null>((res) => cvs.toBlob(res, "image/jpeg", 0.92));
-          if (!blob) throw new Error("Could not process " + file.name);
-          imageBytes = new Uint8Array(await blob.arrayBuffer());
-          type = "jpg";
+        try {
+          if (item.file.size > 60 * 1024 * 1024) {
+            throw new Error(`"${item.file.name}" is too large to process (over 60 MB).`);
+          }
+          const processed = await processImageForPdf(item.file);
+          const image =
+            processed.type === "png"
+              ? await doc.embedPng(processed.bytes)
+              : await doc.embedJpg(processed.bytes);
+          const page = doc.addPage([image.width, image.height]);
+          page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+          addedAny = true;
+        } catch (err) {
+          failures.push(err instanceof Error ? err.message : `Could not process "${item.file.name}".`);
         }
-
-        const image = type === "png" ? await doc.embedPng(imageBytes) : await doc.embedJpg(imageBytes);
-        const page = doc.addPage([image.width, image.height]);
-        page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
       }
+
+      if (!addedAny) {
+        toast.error("None of the selected images could be processed.");
+        return;
+      }
+
       downloadBlob(await doc.save(), filename);
-      toast.success("PDF ready.");
+      if (failures.length) {
+        toast.warning(`PDF created, but ${failures.length} image${failures.length > 1 ? "s" : ""} were skipped: ${failures.join(" ")}`);
+      } else {
+        toast.success("PDF ready.");
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not build PDF.");
+      toast.error(error instanceof Error ? error.message : "PDF generation failed. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -636,36 +739,52 @@ function ImagesToPdfCaptureTool({
 
   return (
     <div className="space-y-6">
-      <DropZone
-        onFiles={addFiles}
-        accept={accept}
-        hint={hint}
-      />
-      
+      <DropZone onFiles={addFiles} accept={accept} hint={hint} multiple />
+
       {items.length > 0 && (
         <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-          <div className="text-sm font-medium text-muted-foreground mb-2 flex justify-between items-center">
+          <div className="text-sm font-medium text-muted-foreground mb-1 flex flex-wrap justify-between items-center gap-1">
             <span>{items.length} image{items.length > 1 ? "s" : ""} selected</span>
-            <span className="text-xs">Use arrows to reorder</span>
+            <span className="text-xs">Drag to change their PDF page order</span>
           </div>
-          
-          <div className="max-h-80 overflow-y-auto space-y-2 pr-2">
+
+          <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
             {items.map((item, i) => (
-              <div key={item.id} className="flex items-center gap-3 bg-secondary/30 border border-border p-2 rounded-lg transition-colors hover:bg-secondary/50">
-                <img src={item.url} alt="thumbnail" className="w-14 h-14 object-cover rounded bg-white shadow-sm" />
-                <span className="flex-1 truncate text-sm font-medium text-foreground" title={item.file.name}>
-                  {item.file.name}
+              <div
+                key={item.id}
+                draggable
+                onDragStart={() => onDragStart(i)}
+                onDragOver={(e) => onDragOver(i, e)}
+                onDrop={() => onDrop(i)}
+                onDragEnd={() => setDragOverIndex(null)}
+                className={`flex items-center gap-2 sm:gap-3 bg-secondary/30 border border-border p-2 rounded-lg transition-colors hover:bg-secondary/50 cursor-move ${dragOverIndex === i ? "border-primary ring-1 ring-primary" : ""}`}
+              >
+                <span className="w-5 shrink-0 text-center text-xs font-semibold text-muted-foreground tabular-nums">
+                  {i + 1}
                 </span>
-                
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0}>
+                <img
+                  src={item.url}
+                  alt="thumbnail"
+                  className="w-12 h-12 sm:w-14 sm:h-14 object-cover rounded bg-white shadow-sm shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="truncate text-sm font-medium text-foreground" title={item.file.name}>
+                    {item.file.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {(item.file.type || "unknown").split("/")[1]?.toUpperCase() ?? "FILE"} · {formatBytes(item.file.size)}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0} aria-label="Move up">
                     <ChevronUp className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1} aria-label="Move down">
                     <ChevronDown className="h-4 w-4" />
                   </Button>
-                  <div className="w-px h-5 bg-border mx-1" />
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)}>
+                  <div className="w-px h-5 bg-border mx-0.5 hidden sm:block" />
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)} aria-label="Remove image">
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
@@ -674,7 +793,7 @@ function ImagesToPdfCaptureTool({
           </div>
         </div>
       )}
-      
+
       <div className="flex justify-end">
         <Button variant="action" size="xl" onClick={run} disabled={!items.length || busy}>
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create PDF
@@ -683,7 +802,6 @@ function ImagesToPdfCaptureTool({
     </div>
   );
 }
-// ----------------------------------------------------------------------
 
 export function CropPdfTool() {
   const [file, setFile] = useState<File | null>(null);
@@ -773,6 +891,15 @@ export function EditPdfTool() {
   );
 }
 
+/**
+ * True redaction: the old version only painted a black rectangle on top of
+ * the page while the original text stayed selectable and copyable
+ * underneath — not real redaction. This version rasterizes the chosen page
+ * (renders it to an image via pdf.js, draws the black box on that image,
+ * then replaces the page with the flattened image) so the covered text is
+ * actually gone from the output file, not just visually hidden. Other pages
+ * are left as normal vector/text pages and are untouched.
+ */
 export function RedactPdfTool() {
   const [file, setFile] = useState<File | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -898,6 +1025,14 @@ export function RedactPdfTool() {
   );
 }
 
+/**
+ * Renamed from "Remove watermark" to be honest about what this does: it
+ * paints an opaque box over a region you choose on every page. It does not
+ * detect or erase an actual watermark object/text — no client-side library
+ * here can reliably do that for arbitrary PDFs. The old version hardcoded a
+ * centered box, which only worked if the watermark happened to sit there;
+ * this version lets you position and size the covered region yourself.
+ */
 export function RemoveWatermarkTool() {
   const [file, setFile] = useState<File | null>(null);
   const [xPct, setXPct] = useState(15);
