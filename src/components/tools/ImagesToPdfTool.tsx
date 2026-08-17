@@ -2,18 +2,26 @@ import { useEffect, useState } from "react";
 import { PDFDocument } from "pdf-lib";
 import { DropZone } from "@/components/site/DropZone";
 import { Button } from "@/components/ui/button";
-import { downloadBlob } from "@/lib/download";
-import { Loader2, X, ChevronUp, ChevronDown } from "lucide-react";
+import { downloadBlob, formatBytes } from "@/lib/download";
+import { Loader2, X, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+const UNIVERSAL_IMAGE_ACCEPT = {
+  "image/*": [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".heif", ".gif", ".svg", ".tiff", ".tif"]
+};
 
 export function ImagesToPdfTool({
   hint,
+  accept, // We capture this but override it to force all-image support
 }: {
   accept?: Record<string, string[]>;
   hint?: string;
 }) {
   const [items, setItems] = useState<{ id: string; file: File; url: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Clean up object URLs to prevent memory leaks when components unmount
   useEffect(() => {
@@ -55,41 +63,53 @@ export function ImagesToPdfTool({
     setBusy(true);
     try {
       const doc = await PDFDocument.create();
+      
       for (const item of items) {
         const { file } = item;
-        
-        const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-        const isJpg = file.type === "image/jpeg" || file.type === "image/jpg" || file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg");
+        try {
+          const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
+          const isJpg = file.type === "image/jpeg" || file.type === "image/jpg" || file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg");
 
-        let imageBytes: Uint8Array;
-        let type: "png" | "jpg" = "jpg";
+          let imageBytes: Uint8Array;
+          let type: "png" | "jpg" = "jpg";
 
-        // If it's a native format supported by pdf-lib, use raw bytes directly
-        if (isPng || isJpg) {
-          imageBytes = new Uint8Array(await file.arrayBuffer());
-          type = isPng ? "png" : "jpg";
-        } else {
-          // If it's WebP, BMP, GIF, HEIC etc., draw it to a canvas and convert to JPEG
-          const bmp = await createImageBitmap(file);
-          const cvs = document.createElement("canvas");
-          cvs.width = bmp.width;
-          cvs.height = bmp.height;
-          const ctx = cvs.getContext("2d");
-          if (!ctx) throw new Error("Canvas rendering not supported");
-          ctx.drawImage(bmp, 0, 0);
+          // If it's natively supported, use the raw buffer to preserve 100% original quality
+          if (isPng || isJpg) {
+            imageBytes = new Uint8Array(await file.arrayBuffer());
+            type = isPng ? "png" : "jpg";
+          } else {
+            // For WebP, HEIC, GIF, SVG, etc. -> convert via Canvas.
+            // createImageBitmap natively respects EXIF rotation in modern browsers.
+            const bmp = await createImageBitmap(file);
+            const cvs = document.createElement("canvas");
+            cvs.width = bmp.width;
+            cvs.height = bmp.height;
+            
+            const ctx = cvs.getContext("2d");
+            if (!ctx) throw new Error("Canvas rendering not supported");
+            ctx.drawImage(bmp, 0, 0);
+            
+            // Export as PNG to safely preserve transparency for GIFs/SVGs/WebPs
+            const blob = await new Promise<Blob | null>((res) => cvs.toBlob(res, "image/png"));
+            if (!blob) throw new Error("Conversion failed");
+            
+            imageBytes = new Uint8Array(await blob.arrayBuffer());
+            type = "png";
+          }
+
+          const image = type === "png" ? await doc.embedPng(imageBytes) : await doc.embedJpg(imageBytes);
           
-          const blob = await new Promise<Blob | null>((res) => cvs.toBlob(res, "image/jpeg", 0.92));
-          if (!blob) throw new Error("Could not process " + file.name);
-          imageBytes = new Uint8Array(await blob.arrayBuffer());
-          type = "jpg";
-        }
+          // Size the PDF page exactly to the image dimensions to prevent any stretching
+          const page = doc.addPage([image.width, image.height]);
+          page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
 
-        const image = type === "png" ? await doc.embedPng(imageBytes) : await doc.embedJpg(imageBytes);
-        const page = doc.addPage([image.width, image.height]);
-        page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+        } catch (imageErr) {
+          throw new Error(`Failed to process "${file.name}". The image may be corrupted or unsupported.`);
+        }
       }
-      downloadBlob(await doc.save(), "images-to-pdf.pdf");
-      toast.success("PDF ready.");
+      
+      downloadBlob(await doc.save(), "lazy-pdf-images.pdf");
+      toast.success("PDF created successfully.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not build PDF.");
     } finally {
@@ -101,37 +121,89 @@ export function ImagesToPdfTool({
     <div className="space-y-6">
       <DropZone
         onFiles={addFiles}
-        // Force overriding to accept all image types, regardless of what the parent page requests
-        accept={{ "image/*": [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".gif"] }}
+        accept={UNIVERSAL_IMAGE_ACCEPT}
+        multiple={true}
         hint={hint || "Drop any images here. They'll be added in the order shown."}
       />
       
       {items.length > 0 && (
         <div className="rounded-2xl border border-border bg-card p-4 space-y-4 shadow-sm">
-          <div className="text-base font-medium text-muted-foreground flex justify-between items-center px-1">
-            <span>{items.length} image{items.length > 1 ? "s" : ""} selected</span>
-            <span className="text-sm">Use arrows to reorder</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+            <span className="text-base font-semibold text-foreground">
+              {items.length} image{items.length > 1 ? "s" : ""} selected
+            </span>
+            <span className="text-sm text-muted-foreground bg-secondary/50 px-3 py-1 rounded-full w-fit">
+              Drag images or use arrows to change PDF page order
+            </span>
           </div>
           
-          {/* Increased max-height to 60vh to show more items, increased spacing */}
-          <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-2">
+          <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-2 pb-2">
             {items.map((item, i) => (
-              <div key={item.id} className="flex items-center gap-4 bg-secondary/30 border border-border p-3 rounded-lg transition-colors hover:bg-secondary/50">
-                {/* Increased thumbnail size from w-14 to w-24 */}
-                <img src={item.url} alt="thumbnail" className="w-24 h-24 object-cover rounded bg-white shadow-sm" />
-                <span className="flex-1 truncate text-base font-medium text-foreground" title={item.file.name}>
-                  {item.file.name}
+              <div 
+                key={item.id} 
+                draggable
+                onDragStart={(e) => {
+                  setDraggedIdx(i);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverIdx(i);
+                }}
+                onDragLeave={() => setDragOverIdx(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (draggedIdx === null || draggedIdx === i) {
+                    setDragOverIdx(null);
+                    setDraggedIdx(null);
+                    return;
+                  }
+                  const newItems = [...items];
+                  const [moved] = newItems.splice(draggedIdx, 1);
+                  newItems.splice(i, 0, moved);
+                  setItems(newItems);
+                  setDragOverIdx(null);
+                  setDraggedIdx(null);
+                }}
+                className={cn(
+                  "flex items-center gap-3 sm:gap-4 bg-card border p-3 rounded-xl transition-all",
+                  dragOverIdx === i 
+                    ? "border-[var(--brand)] ring-1 ring-[var(--brand)] shadow-md bg-secondary/40 scale-[1.01]" 
+                    : "border-border hover:bg-secondary/20 hover:shadow-sm"
+                )}
+              >
+                <div className="hidden sm:flex cursor-grab active:cursor-grabbing text-muted-foreground p-1 hover:text-foreground">
+                  <GripVertical className="w-5 h-5" />
+                </div>
+
+                <span className="text-sm font-bold text-muted-foreground w-6 text-center shrink-0">
+                  {i + 1}
                 </span>
+
+                <img 
+                  src={item.url} 
+                  alt="thumbnail" 
+                  className="w-16 h-16 sm:w-20 sm:h-20 object-contain rounded bg-white shadow-sm border border-border/50 shrink-0" 
+                />
                 
-                {/* Increased button and icon sizes for better click targets */}
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                  <span className="truncate text-base font-medium text-foreground" title={item.file.name}>
+                    {item.file.name}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide mt-1">
+                    {item.file.type.split('/')[1] || "IMAGE"} • {formatBytes(item.file.size)}
+                  </span>
+                </div>
+                
+                <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
                   <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0}>
                     <ChevronUp className="h-5 w-5" />
                   </Button>
                   <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1}>
                     <ChevronDown className="h-5 w-5" />
                   </Button>
-                  <div className="w-px h-6 bg-border mx-2" />
+                  <div className="hidden sm:block w-px h-6 bg-border mx-1 sm:mx-2" />
                   <Button variant="ghost" size="icon" className="h-10 w-10 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)}>
                     <X className="h-5 w-5" />
                   </Button>
