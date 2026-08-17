@@ -10,7 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlignLeft,
@@ -2296,7 +2296,10 @@ function AnnotationLayer(props: {
         // Discard duplicate pointer samples without changing the path shape.
         if (previous && Math.hypot(previous.x - p.x, previous.y - p.y) < 0.15) return;
         stroke.points.push(p);
-        setDrawPoints([...stroke.points]);
+        // Native window pointer events can be batched by React, which delays
+        // paint until pointerup. Flush this lightweight preview update so ink
+        // follows the pointer while drawing.
+        flushSync(() => setDrawPoints([...stroke.points]));
       } else {
         const start = dragStateRef.current!.startPt;
         if (start) {
@@ -2911,12 +2914,17 @@ function AnnotationLayer(props: {
         />
       )}
       {drawPoints && drawPoints.length > 1 && (
-        <svg className="absolute inset-0" style={{ pointerEvents: "none" }}>
+        <svg
+          className="absolute inset-0"
+          width="100%"
+          height="100%"
+          style={{ pointerEvents: "none", overflow: "visible" }}
+        >
           <polyline
             points={drawPoints.map((p) => `${p.x * props.scale},${p.y * props.scale}`).join(" ")}
             fill="none"
             stroke={props.brushColor}
-            strokeWidth={props.brushSize}
+            strokeWidth={props.brushSize * props.scale}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
