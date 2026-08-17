@@ -6,6 +6,7 @@ import { downloadBlob, formatBytes } from "@/lib/download";
 import { Loader2, X, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Reorder, useDragControls } from "framer-motion";
 
 const UNIVERSAL_IMAGE_ACCEPT = {
   "image/*": [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".heif", ".gif", ".svg", ".tiff", ".tif"]
@@ -20,8 +21,6 @@ export function ImagesToPdfTool({
 }) {
   const [items, setItems] = useState<{ id: string; file: File; url: string }[]>([]);
   const [busy, setBusy] = useState(false);
-  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Clean up object URLs to prevent memory leaks when components unmount
   useEffect(() => {
@@ -137,80 +136,25 @@ export function ImagesToPdfTool({
             </span>
           </div>
           
-          <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-2 pb-2">
+          <Reorder.Group
+            axis="y"
+            values={items}
+            onReorder={setItems}
+            className="max-h-[60vh] overflow-y-auto space-y-3 pr-2 pb-2"
+            as="div"
+          >
             {items.map((item, i) => (
-              <div 
-                key={item.id} 
-                draggable
-                onDragStart={(e) => {
-                  setDraggedIdx(i);
-                  e.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  setDragOverIdx(i);
-                }}
-                onDragLeave={() => setDragOverIdx(null)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (draggedIdx === null || draggedIdx === i) {
-                    setDragOverIdx(null);
-                    setDraggedIdx(null);
-                    return;
-                  }
-                  const newItems = [...items];
-                  const [moved] = newItems.splice(draggedIdx, 1);
-                  newItems.splice(i, 0, moved);
-                  setItems(newItems);
-                  setDragOverIdx(null);
-                  setDraggedIdx(null);
-                }}
-                className={cn(
-                  "flex items-center gap-3 sm:gap-4 bg-card border p-3 rounded-xl transition-all",
-                  dragOverIdx === i 
-                    ? "border-[var(--brand)] ring-1 ring-[var(--brand)] shadow-md bg-secondary/40 scale-[1.01]" 
-                    : "border-border hover:bg-secondary/20 hover:shadow-sm"
-                )}
-              >
-                <div className="hidden sm:flex cursor-grab active:cursor-grabbing text-muted-foreground p-1 hover:text-foreground">
-                  <GripVertical className="w-5 h-5" />
-                </div>
-
-                <span className="text-sm font-bold text-muted-foreground w-6 text-center shrink-0">
-                  {i + 1}
-                </span>
-
-                <img 
-                  src={item.url} 
-                  alt="thumbnail" 
-                  className="w-16 h-16 sm:w-20 sm:h-20 object-contain rounded bg-white shadow-sm border border-border/50 shrink-0" 
-                />
-                
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                  <span className="truncate text-base font-medium text-foreground" title={item.file.name}>
-                    {item.file.name}
-                  </span>
-                  <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide mt-1">
-                    {item.file.type.split('/')[1] || "IMAGE"} • {formatBytes(item.file.size)}
-                  </span>
-                </div>
-                
-                <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0}>
-                    <ChevronUp className="h-5 w-5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1}>
-                    <ChevronDown className="h-5 w-5" />
-                  </Button>
-                  <div className="hidden sm:block w-px h-6 bg-border mx-1 sm:mx-2" />
-                  <Button variant="ghost" size="icon" className="h-10 w-10 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)}>
-                    <X className="h-5 w-5" />
-                  </Button>
-                </div>
-              </div>
+              <SortableImageItem
+                key={item.id}
+                item={item}
+                index={i}
+                total={items.length}
+                onMoveUp={() => moveUp(i)}
+                onMoveDown={() => moveDown(i)}
+                onRemove={() => remove(i)}
+              />
             ))}
-          </div>
+          </Reorder.Group>
         </div>
       )}
       
@@ -220,5 +164,74 @@ export function ImagesToPdfTool({
         </Button>
       </div>
     </div>
+  );
+}
+
+// Separate component required to use the useDragControls hook
+function SortableImageItem({
+  item,
+  index,
+  total,
+  onMoveUp,
+  onMoveDown,
+  onRemove
+}: {
+  item: { id: string; file: File; url: string };
+  index: number;
+  total: number;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
+  const controls = useDragControls();
+
+  return (
+    <Reorder.Item
+      value={item}
+      dragListener={false} // Disable dragging the whole card so mobile scrolling still works
+      dragControls={controls}
+      as="div"
+      className="flex items-center gap-3 sm:gap-4 bg-card border border-border p-3 rounded-xl transition-colors hover:bg-secondary/20 hover:shadow-sm"
+    >
+      {/* Mobile-friendly drag handle */}
+      <div
+        className="flex cursor-grab active:cursor-grabbing text-muted-foreground p-2 -ml-2 hover:text-foreground touch-none"
+        onPointerDown={(e) => controls.start(e)}
+      >
+        <GripVertical className="w-5 h-5 sm:w-6 sm:h-6" />
+      </div>
+
+      <span className="text-sm font-bold text-muted-foreground w-6 text-center shrink-0">
+        {index + 1}
+      </span>
+
+      <img 
+        src={item.url} 
+        alt="thumbnail" 
+        className="w-16 h-16 sm:w-20 sm:h-20 object-contain rounded bg-white shadow-sm border border-border/50 shrink-0" 
+      />
+      
+      <div className="flex-1 min-w-0 flex flex-col justify-center">
+        <span className="truncate text-base font-medium text-foreground" title={item.file.name}>
+          {item.file.name}
+        </span>
+        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide mt-1">
+          {item.file.type.split('/')[1] || "IMAGE"} • {formatBytes(item.file.size)}
+        </span>
+      </div>
+      
+      <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+        <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={onMoveUp} disabled={index === 0}>
+          <ChevronUp className="h-5 w-5" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground" onClick={onMoveDown} disabled={index === total - 1}>
+          <ChevronDown className="h-5 w-5" />
+        </Button>
+        <div className="hidden sm:block w-px h-6 bg-border mx-1 sm:mx-2" />
+        <Button variant="ghost" size="icon" className="h-10 w-10 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={onRemove}>
+          <X className="h-5 w-5" />
+        </Button>
+      </div>
+    </Reorder.Item>
   );
 }
