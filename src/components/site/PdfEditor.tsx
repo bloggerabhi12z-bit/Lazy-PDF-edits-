@@ -9,7 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlignLeft,
@@ -49,6 +49,8 @@ import {
   Underline as UnderlineIcon,
   Undo2,
   X,
+  ChevronDown,
+  Minus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/download";
@@ -116,6 +118,7 @@ type Tool =
   | "shape-rect"
   | "shape-ellipse"
   | "shape-line"
+  | "emoji"
   | "highlight"
   | "underline"
   | "strikeout"
@@ -164,6 +167,11 @@ const FONT_PREVIEW_CHOICES = [...SYSTEM_FONT_FAMILIES, ...GOOGLE_FONT_FAMILIES];
 const PALETTE = ["#111827", "#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#ec4899", "#ffffff"];
 const HIGHLIGHT_PALETTE = ["#fde047", "#86efac", "#93c5fd", "#fca5a5", "#f0abfc"];
 
+const EMOJI_LIST = [
+  "🙂", "😂", "😎", "😍", "🤔", "😬", "🙏", "👍", "👎", "👏", "🙌", 
+  "❗", "❓", "✅", "❌", "🔥", "✨", "💯", "🎉", "⭐", "💡", "📌", "⚠️", "🛑"
+];
+
 function fontFamilyStack(name: string): string {
   const serif = ["Times New Roman", "Georgia", "Palatino", "Garamond", "Book Antiqua", "Cambria", "Baskerville", "Didot", "PT Serif", "Merriweather", "Playfair Display", "Crimson Text", "Libre Baskerville", "EB Garamond", "Cormorant Garamond", "Bitter", "Zilla Slab", "IBM Plex Serif"];
   const mono = ["Courier New", "Lucida Console", "Consolas", "Roboto Mono", "JetBrains Mono", "IBM Plex Mono"];
@@ -196,13 +204,14 @@ export function PdfEditor({
   const [activeTool, setActiveTool] = useState<Tool>("select");
 
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
-  const [showRightSidebar, setShowRightSidebar] = useState<boolean>(true);
-  
   const [isMobile, setIsMobile] = useState(false);
 
   const [brushColor, setBrushColor] = useState(PALETTE[1]);
   const [highlightColor, setHighlightColor] = useState(HIGHLIGHT_PALETTE[0]);
   const [brushSize, setBrushSize] = useState(3);
+  
+  const [showShapesMenu, setShowShapesMenu] = useState(false);
+  const [selectedEmoji, setSelectedEmoji] = useState(EMOJI_LIST[0]);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 1024);
@@ -214,7 +223,6 @@ export function PdfEditor({
   useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setShowLeftSidebar(false);
-      setShowRightSidebar(false);
     }
   }, []);
 
@@ -234,17 +242,23 @@ export function PdfEditor({
   const [showMoreTools, setShowMoreTools] = useState(false);
   const [moreToolsPos, setMoreToolsPos] = useState<{ top: number; left: number } | null>(null);
   const moreBtnRef = useRef<HTMLDivElement | null>(null);
+  const shapesBtnRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!showMoreTools) return;
     function onDocPointerDown(ev: PointerEvent) {
       const target = ev.target as Node;
-      if (moreBtnRef.current && !moreBtnRef.current.contains(target)) {
+      if (showMoreTools && moreBtnRef.current && !moreBtnRef.current.contains(target)) {
         setShowMoreTools(false);
+      }
+      if (showShapesMenu && shapesBtnRef.current && !shapesBtnRef.current.contains(target)) {
+        setShowShapesMenu(false);
       }
     }
     function onDocKey(ev: KeyboardEvent) {
-      if (ev.key === "Escape") setShowMoreTools(false);
+      if (ev.key === "Escape") {
+        setShowMoreTools(false);
+        setShowShapesMenu(false);
+      }
     }
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onDocKey);
@@ -252,7 +266,7 @@ export function PdfEditor({
       document.removeEventListener("pointerdown", onDocPointerDown);
       document.removeEventListener("keydown", onDocKey);
     };
-  }, [showMoreTools]);
+  }, [showMoreTools, showShapesMenu]);
 
   const [phase, setPhase] = useState<Phase>("reading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -322,7 +336,7 @@ export function PdfEditor({
     setCurrent(0);
     setSuccess(null);
     historyRef.current = [];
-    historyIndexRef.current = -1;
+    historyIndexRef.current = 0;
     textCacheRef.current = {};
 
     (async () => {
@@ -596,36 +610,6 @@ export function PdfEditor({
     });
   }, []);
 
-  const reorderZ = useCallback(
-    (ids: Set<string>, direction: "forward" | "backward" | "front" | "back") => {
-      setElements((es) => {
-        const next = [...es];
-        const indices = next.map((e, i) => (ids.has(e.id) ? i : -1)).filter((i) => i >= 0);
-        if (indices.length === 0) return es;
-        if (direction === "front") {
-          const items = indices.map((i) => next[i]);
-          const rest = next.filter((_, i) => !indices.includes(i));
-          return [...rest, ...items];
-        }
-        if (direction === "back") {
-          const items = indices.map((i) => next[i]);
-          const rest = next.filter((_, i) => !indices.includes(i));
-          return [...items, ...rest];
-        }
-        const step = direction === "forward" ? 1 : -1;
-        const order = direction === "forward" ? [...indices].reverse() : indices;
-        for (const i of order) {
-          const j = i + step;
-          if (j < 0 || j >= next.length) continue;
-          if (ids.has(next[j].id)) continue;
-          [next[i], next[j]] = [next[j], next[i]];
-        }
-        return next;
-      });
-    },
-    []
-  );
-
   const selectedElements = useMemo(
     () => elements.filter((e) => selectedIds.has(e.id)),
     [elements, selectedIds]
@@ -874,7 +858,10 @@ export function PdfEditor({
       if (result && "blob" in result) {
         let finalBlob = result.blob;
         try {
-          finalBlob = await stampElements(result.blob, pages, elements);
+          const relevantElements = elements.filter((e) =>
+            extractedPages.some((p) => p.id === e.pageId)
+          );
+          finalBlob = await stampElements(result.blob, pages, relevantElements);
         } catch (e) {
           console.error("Failed to stamp annotations", e);
           toast.error("Page changes were saved, but annotations could not be applied.");
@@ -1128,7 +1115,25 @@ export function PdfEditor({
         <ToolBtn icon={<PenLine />} label="Draw" active={activeTool === "draw"} disabled={annotateDisabled} onClick={() => { setActiveTool("draw"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<Highlighter />} label="Highlight" active={activeTool === "highlight"} disabled={annotateDisabled} onClick={() => { setActiveTool("highlight"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<Eraser />} label="Eraser" active={activeTool === "eraser"} disabled={annotateDisabled} onClick={() => { setActiveTool("eraser"); setSelectedIds(new Set()); }} />
-        <ToolBtn icon={<Square />} label="Shapes" active={activeTool.startsWith("shape")} disabled={annotateDisabled} onClick={() => { setActiveTool("shape-rect"); setSelectedIds(new Set()); }} />
+        
+        <div className="relative shrink-0" ref={shapesBtnRef}>
+          <ToolBtn
+            icon={<Square />}
+            label="Shapes"
+            active={activeTool.startsWith("shape") || activeTool === "emoji"}
+            disabled={annotateDisabled}
+            onClick={() => setShowShapesMenu((s) => !s)}
+          />
+          {showShapesMenu && (
+            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 flex items-center gap-1 z-50">
+              <button onClick={() => { setActiveTool("shape-line"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded flex items-center justify-center", activeTool === "shape-line" ? "bg-red-50 dark:bg-red-900/30 text-[#DC2626]" : "hover:bg-gray-100 dark:hover:bg-gray-800")} title="Line"><Minus className="w-4 h-4" /></button>
+              <button onClick={() => { setActiveTool("shape-rect"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded flex items-center justify-center", activeTool === "shape-rect" ? "bg-red-50 dark:bg-red-900/30 text-[#DC2626]" : "hover:bg-gray-100 dark:hover:bg-gray-800")} title="Rectangle"><Square className="w-4 h-4" /></button>
+              <button onClick={() => { setActiveTool("shape-ellipse"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded-full flex items-center justify-center border", activeTool === "shape-ellipse" ? "bg-red-50 dark:bg-red-900/30 border-[#DC2626]" : "border-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800")} title="Ellipse" />
+              <button onClick={() => { setActiveTool("emoji"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded flex items-center justify-center text-lg", activeTool === "emoji" ? "bg-red-50 dark:bg-red-900/30" : "hover:bg-gray-100 dark:hover:bg-gray-800")} title="Emoji">🙂</button>
+            </div>
+          )}
+        </div>
+
         <ToolBtn icon={<PenTool />} label="Sign" active={activeTool === "signature"} disabled={annotateDisabled} onClick={() => { setActiveTool("signature"); openSignature(); }} />
         
         <Divider />
@@ -1182,16 +1187,23 @@ export function PdfEditor({
               />
             ))}
             <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-            <input
-              type="range"
-              min={1}
-              max={24}
-              value={brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
-              className="w-16 sm:w-24 accent-[#DC2626]"
-              title="Brush Size"
-              aria-label="Brush Size"
-            />
+            <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-1 shrink-0">
+              <button
+                onClick={() => setBrushSize((s) => Math.max(1, s - 1))}
+                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                aria-label="Decrease size"
+              >
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              <span className="text-xs font-medium w-9 text-center tabular-nums">{brushSize} pt</span>
+              <button
+                onClick={() => setBrushSize((s) => Math.min(24, s + 1))}
+                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                aria-label="Increase size"
+              >
+                <ChevronDown className="w-3 h-3 rotate-180" />
+              </button>
+            </div>
           </div>
         )}
         
@@ -1212,63 +1224,80 @@ export function PdfEditor({
               />
             ))}
             <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-            <input
-              type="range"
-              min={1}
-              max={24}
-              value={brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
-              className="w-16 sm:w-24 accent-[#DC2626]"
-              title="Brush Size"
-              aria-label="Brush Size"
-            />
+            <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-1 shrink-0">
+              <button
+                onClick={() => setBrushSize((s) => Math.max(1, s - 1))}
+                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                aria-label="Decrease size"
+              >
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              <span className="text-xs font-medium w-9 text-center tabular-nums">{brushSize} pt</span>
+              <button
+                onClick={() => setBrushSize((s) => Math.min(24, s + 1))}
+                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                aria-label="Increase size"
+              >
+                <ChevronDown className="w-3 h-3 rotate-180" />
+              </button>
+            </div>
           </div>
         )}
 
-        <Divider />
-        <div ref={moreBtnRef} className="relative shrink-0">
-          <ToolBtn
-            icon={<MoreHorizontal />}
-            label="More"
-            active={showMoreTools || ["whiteout", "sticky"].includes(activeTool)}
-            disabled={annotateDisabled}
-            onClick={(ev?: ReactMouseEvent) => {
-              if (!showMoreTools && moreBtnRef.current) {
-                const r = moreBtnRef.current.getBoundingClientRect();
-                setMoreToolsPos({ top: r.bottom + 4, left: r.left });
-              }
-              setShowMoreTools((s) => !s);
-            }}
-          />
-        </div>
-        {typeof document !== "undefined" &&
-          createPortal(
-            <AnimatePresence>
-              {showMoreTools && moreToolsPos && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  style={{ position: "fixed", top: moreToolsPos.top, left: moreToolsPos.left }}
-                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 w-40 z-[10000]"
-                >
-                  <button
-                    onClick={() => { setActiveTool("whiteout"); setSelectedIds(new Set()); setShowMoreTools(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <Eraser className="w-4 h-4" /> Whiteout
-                  </button>
-                  <button
-                    onClick={() => { setActiveTool("sticky"); setSelectedIds(new Set()); setShowMoreTools(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <MessageSquare className="w-4 h-4" /> Sticky note
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>,
-            document.body
-          )}
+        {activeTool === "emoji" && (
+          <div className="flex items-center gap-1.5 px-2 max-w-xs sm:max-w-md overflow-x-auto overflow-y-hidden shrink-0">
+            <Divider />
+            {EMOJI_LIST.map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => setSelectedEmoji(emoji)}
+                className={cn(
+                  "w-7 h-7 shrink-0 rounded flex items-center justify-center text-lg hover:bg-gray-100 dark:hover:bg-gray-800",
+                  selectedEmoji === emoji && "bg-red-50 dark:bg-red-900/30"
+                )}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {activeTool === "select" && singleSelected?.type === "text" && (
+          <div className="flex items-center gap-1.5 px-2">
+            <Divider />
+            <select
+              value={(singleSelected as TextElement).font}
+              onChange={(e) => updateElement(singleSelected.id, { font: e.target.value as TextElement["font"] })}
+              className="h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1.5 text-xs"
+            >
+              {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f === "TimesRoman" ? "Times New Roman" : f}</option>)}
+            </select>
+            <input
+              type="number"
+              min={6} max={96}
+              value={(singleSelected as TextElement).fontSize}
+              onChange={(e) => updateElement(singleSelected.id, { fontSize: Number(e.target.value) })}
+              className="w-12 h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center"
+            />
+            <div className="flex items-center gap-0.5 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-0.5 shrink-0">
+              <button onClick={() => updateElement(singleSelected.id, { bold: !(singleSelected as TextElement).bold })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).bold && "bg-red-50 text-[#DC2626]")}><Bold className="w-3.5 h-3.5" /></button>
+              <button onClick={() => updateElement(singleSelected.id, { italic: !(singleSelected as TextElement).italic })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).italic && "bg-red-50 text-[#DC2626]")}><Italic className="w-3.5 h-3.5" /></button>
+              <button onClick={() => updateElement(singleSelected.id, { underline: !(singleSelected as TextElement).underline })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).underline && "bg-red-50 text-[#DC2626]")}><UnderlineIcon className="w-3.5 h-3.5" /></button>
+            </div>
+            <input
+              type="color"
+              value={(singleSelected as TextElement).color}
+              onChange={(e) => updateElement(singleSelected.id, { color: e.target.value })}
+              className="w-7 h-7 rounded cursor-pointer border border-gray-200 dark:border-gray-700 shrink-0"
+              title="Text color"
+            />
+            <div className="flex items-center gap-0.5 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-0.5 shrink-0">
+              <button onClick={() => updateElement(singleSelected.id, { align: "left" })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).align === "left" && "bg-red-50 text-[#DC2626]")}><AlignLeft className="w-3.5 h-3.5" /></button>
+              <button onClick={() => updateElement(singleSelected.id, { align: "center" })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).align === "center" && "bg-red-50 text-[#DC2626]")}><AlignCenter className="w-3.5 h-3.5" /></button>
+              <button onClick={() => updateElement(singleSelected.id, { align: "right" })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).align === "right" && "bg-red-50 text-[#DC2626]")}><AlignRight className="w-3.5 h-3.5" /></button>
+            </div>
+          </div>
+        )}
 
         <div className="ml-auto sm:hidden">
           <Button
@@ -1407,7 +1436,9 @@ export function PdfEditor({
         </AnimatePresence>
 
         <button
-          onClick={() => setShowLeftSidebar((s) => !s)}
+          onClick={() => {
+            setShowLeftSidebar((s) => !s);
+          }}
           className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
           style={{ left: showLeftSidebar && !isMobile ? 200 : 0 }}
           title={showLeftSidebar ? "Hide pages panel" : "Show pages panel"}
@@ -1449,6 +1480,7 @@ export function PdfEditor({
               brushColor={brushColor}
               highlightColor={highlightColor}
               brushSize={brushSize}
+              selectedEmoji={selectedEmoji}
             />
           )}
 
@@ -1491,7 +1523,7 @@ export function PdfEditor({
             </button>
             <span className="font-medium w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
             <button
-              onClick={() => { setFitMode("custom"); setZoom((z) => Math.min(4, +(z + 0.05).toFixed(2))); }}
+              onClick={() => { setFitMode("custom"); setZoom((z) => Math.min(4, +(z - 0.05).toFixed(2))); }}
               className="p-1 rounded hover:bg-white/20"
               title="Zoom in"
             >
@@ -1627,6 +1659,7 @@ function PreviewCanvas(props: {
   brushColor: string;
   highlightColor: string;
   brushSize: number;
+  selectedEmoji: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
@@ -1745,6 +1778,7 @@ function PreviewCanvas(props: {
             brushColor={props.brushColor}
             highlightColor={props.highlightColor}
             brushSize={props.brushSize}
+            selectedEmoji={props.selectedEmoji}
           />
         ))}
       </div>
@@ -1780,6 +1814,7 @@ function PagePane(props: {
   brushColor: string;
   highlightColor: string;
   brushSize: number;
+  selectedEmoji: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -1899,6 +1934,7 @@ function PagePane(props: {
           brushColor={props.brushColor}
           highlightColor={props.highlightColor}
           brushSize={props.brushSize}
+          selectedEmoji={props.selectedEmoji}
         />
       )}
     </div>
@@ -1934,6 +1970,7 @@ function AnnotationLayer(props: {
   brushColor: string;
   highlightColor: string;
   brushSize: number;
+  selectedEmoji: string;
 }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -2095,7 +2132,7 @@ function AnnotationLayer(props: {
     }
 
     if (props.activeTool === "text") {
-      props.onAddElement({
+      const el: TextElement = {
         id: makeId("txt"),
         pageId: props.pageId,
         type: "text",
@@ -2115,9 +2152,36 @@ function AnnotationLayer(props: {
         align: "left",
         letterSpacing: 0,
         lineSpacing: 1.25,
+      };
+      props.onAddElement(el);
+      return;
+    }
+    
+    if (props.activeTool === "emoji") {
+      props.onAddElement({
+        id: makeId("emoji"),
+        pageId: props.pageId,
+        type: "text",
+        x: pt.x,
+        y: pt.y,
+        width: 48,
+        height: 48,
+        opacity: 1,
+        rotation: 0,
+        text: props.selectedEmoji || "🙂",
+        font: "Helvetica",
+        fontSize: 32,
+        bold: false,
+        italic: false,
+        underline: false,
+        color: "#111827",
+        align: "left",
+        letterSpacing: 0,
+        lineSpacing: 1,
       } as TextElement);
       return;
     }
+
     if (props.activeTool === "sticky") {
       props.onAddElement({
         id: makeId("sticky"),
@@ -2148,7 +2212,9 @@ function AnnotationLayer(props: {
     function onMove(ev: PointerEvent) {
       const p = toPt(ev.clientX, ev.clientY);
       if (props.activeTool === "draw") {
-        setDrawPoints((pts) => (pts ? [...pts, p] : [p]));
+        flushSync(() => {
+          setDrawPoints((pts) => (pts ? [...pts, p] : [p]));
+        });
       } else {
         const start = dragStateRef.current!.startPt;
         if (start) {
@@ -2179,7 +2245,7 @@ function AnnotationLayer(props: {
               minY = Math.min(...ys),
               maxX = Math.max(...xs),
               maxY = Math.max(...ys);
-            props.onAddElement({
+            props.onAddElementKeepTool({
               id: makeId("draw"),
               pageId: props.pageId,
               type: "draw",
@@ -2235,7 +2301,7 @@ function AnnotationLayer(props: {
         props.activeTool === "strikeout" ||
         props.activeTool === "squiggly"
       ) {
-        props.onAddElement({
+        props.onAddElementKeepTool({
           id: makeId("markup"),
           pageId: props.pageId,
           type: props.activeTool,
