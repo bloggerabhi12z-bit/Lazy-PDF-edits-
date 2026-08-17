@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
 import { createTextPdf, stripHtml } from "@/lib/text-pdf";
-import { FileText, Loader2, X } from "lucide-react";
+import { FileText, Loader2, X, ChevronUp, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -332,13 +332,6 @@ async function renderHtmlToPdfBlob(html: string) {
   const pageHeightPt = 841.89;
   const cssWidthPx = 794; // A4 width at 96dpi
 
-  // html2canvas can't parse modern CSS color functions like oklch()/
-  // color-mix(), which this site's Tailwind theme uses globally. Overriding
-  // individual CSS properties on an element appended to document.body isn't
-  // reliable — there are too many color-bearing properties (background-image
-  // gradients, outline-color, etc.) to cover one by one. Instead, render
-  // inside a same-origin iframe with its own blank document, so nothing from
-  // the host page's stylesheet — oklch or otherwise — is inherited at all.
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
   iframe.style.left = "-99999px";
@@ -373,7 +366,6 @@ async function renderHtmlToPdfBlob(html: string) {
 </style></head><body>${html}</body></html>`);
     frameDoc.close();
 
-    // Let layout settle before measuring/rendering.
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     const images = Array.from(frameDoc.images);
@@ -552,8 +544,8 @@ export function ExtractImagesTool() {
 export function ScanToPdfTool() {
   return (
     <ImagesToPdfCaptureTool
-      accept={{ "image/*": [".jpg", ".jpeg", ".png", ".webp"] }}
-      hint="Upload scans or camera photos. On mobile, choose your camera."
+      accept={{ "image/*": [] }}
+      hint="Upload scans, camera photos, or any images. On mobile, choose your camera."
       filename="lazy-pdf-scan.pdf"
     />
   );
@@ -568,17 +560,76 @@ function ImagesToPdfCaptureTool({
   hint: string;
   filename: string;
 }) {
-  const [files, setFiles] = useState<File[]>([]);
+  const [items, setItems] = useState<{ id: string; file: File; url: string }[]>([]);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      items.forEach(item => URL.revokeObjectURL(item.url));
+    };
+  }, [items]);
+
+  function addFiles(newFiles: File[]) {
+    const mapped = newFiles.map(file => ({
+      id: Math.random().toString(36).substring(7),
+      file,
+      url: URL.createObjectURL(file) 
+    }));
+    setItems((current) => [...current, ...mapped]);
+  }
+
+  function moveUp(index: number) {
+    if (index === 0) return;
+    const next = [...items];
+    [next[index - 1], next[index]] = [next[index], next[index - 1]];
+    setItems(next);
+  }
+
+  function moveDown(index: number) {
+    if (index === items.length - 1) return;
+    const next = [...items];
+    [next[index], next[index + 1]] = [next[index + 1], next[index]];
+    setItems(next);
+  }
+
+  function remove(index: number) {
+    URL.revokeObjectURL(items[index].url);
+    setItems(items.filter((_, i) => i !== index));
+  }
+
   async function run() {
-    if (!files.length) return;
+    if (!items.length) return;
     setBusy(true);
     try {
       const doc = await PDFDocument.create();
-      for (const file of files) {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        const isPng = file.type.includes("png") || file.name.toLowerCase().endsWith(".png");
-        const image = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+      for (const item of items) {
+        const { file } = item;
+        
+        const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
+        const isJpg = file.type === "image/jpeg" || file.type === "image/jpg" || file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg");
+
+        let imageBytes: Uint8Array;
+        let type: "png" | "jpg" = "jpg";
+
+        if (isPng || isJpg) {
+          imageBytes = new Uint8Array(await file.arrayBuffer());
+          type = isPng ? "png" : "jpg";
+        } else {
+          const bmp = await createImageBitmap(file);
+          const cvs = document.createElement("canvas");
+          cvs.width = bmp.width;
+          cvs.height = bmp.height;
+          const ctx = cvs.getContext("2d");
+          if (!ctx) throw new Error("Canvas rendering not supported");
+          ctx.drawImage(bmp, 0, 0);
+          
+          const blob = await new Promise<Blob | null>((res) => cvs.toBlob(res, "image/jpeg", 0.92));
+          if (!blob) throw new Error("Could not process " + file.name);
+          imageBytes = new Uint8Array(await blob.arrayBuffer());
+          type = "jpg";
+        }
+
+        const image = type === "png" ? await doc.embedPng(imageBytes) : await doc.embedJpg(imageBytes);
         const page = doc.addPage([image.width, image.height]);
         page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
       }
@@ -590,20 +641,50 @@ function ImagesToPdfCaptureTool({
       setBusy(false);
     }
   }
+
   return (
     <div className="space-y-6">
       <DropZone
-        onFiles={(newFiles) => setFiles((current) => [...current, ...newFiles])}
+        onFiles={addFiles}
         accept={accept}
         hint={hint}
       />
-      {files.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground">
-          {files.length} image{files.length > 1 ? "s" : ""} selected
+      
+      {items.length > 0 && (
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
+          <div className="text-sm font-medium text-muted-foreground mb-2 flex justify-between items-center">
+            <span>{items.length} image{items.length > 1 ? "s" : ""} selected</span>
+            <span className="text-xs">Use arrows to reorder</span>
+          </div>
+          
+          <div className="max-h-80 overflow-y-auto space-y-2 pr-2">
+            {items.map((item, i) => (
+              <div key={item.id} className="flex items-center gap-3 bg-secondary/30 border border-border p-2 rounded-lg transition-colors hover:bg-secondary/50">
+                <img src={item.url} alt="thumbnail" className="w-14 h-14 object-cover rounded bg-white shadow-sm" />
+                <span className="flex-1 truncate text-sm font-medium text-foreground" title={item.file.name}>
+                  {item.file.name}
+                </span>
+                
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0}>
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1}>
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                  <div className="w-px h-5 bg-border mx-1" />
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
+      
       <div className="flex justify-end">
-        <Button variant="action" size="xl" onClick={run} disabled={!files.length || busy}>
+        <Button variant="action" size="xl" onClick={run} disabled={!items.length || busy}>
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create PDF
         </Button>
       </div>
