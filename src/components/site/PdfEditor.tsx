@@ -6,10 +6,11 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlignLeft,
@@ -18,6 +19,8 @@ import {
   ArrowLeft,
   ArrowLeftRight,
   ArrowRight,
+  ArrowDown,
+  ArrowUp,
   Bold,
   Check,
   ChevronLeft,
@@ -106,7 +109,7 @@ type PdfPage = {
 
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
 
-type Mode = "select" | "rotate";
+type Mode = "select" | "rotate" | "reorder";
 type Phase = "reading" | "rendering" | "ready" | "error";
 
 type Tool =
@@ -199,6 +202,7 @@ export function PdfEditor({
 }: PdfEditorProps) {
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
   const [pages, setPages] = useState<EditorPage[]>([]);
+  const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const [elements, setElements] = useState<AnyElement[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeTool, setActiveTool] = useState<Tool>("select");
@@ -502,6 +506,32 @@ export function PdfEditor({
     });
   }, []);
 
+  const movePage = useCallback((from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return;
+    setPages((ps) => {
+      if (from >= ps.length || to >= ps.length) return ps;
+      const next = [...ps];
+      const [page] = next.splice(from, 1);
+      next.splice(to, 0, page);
+      return next;
+    });
+    setCurrent((active) => {
+      if (active === from) return to;
+      if (from < active && active <= to) return active - 1;
+      if (to <= active && active < from) return active + 1;
+      return active;
+    });
+  }, []);
+
+  const handlePageDrop = useCallback((targetIndex: number, event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData("text/plain") || draggedPageId;
+    setDraggedPageId(null);
+    if (!sourceId) return;
+    const sourceIndex = pages.findIndex((page) => page.id === sourceId);
+    if (sourceIndex >= 0) movePage(sourceIndex, targetIndex);
+  }, [draggedPageId, movePage, pages]);
+
   const clearPage = useCallback((pageId: string) => {
     setElements((es) => es.filter((e) => e.pageId !== pageId));
   }, []);
@@ -552,17 +582,18 @@ export function PdfEditor({
       if (result && result.blob) {
         let finalBlob = result.blob;
         try {
-          const relevantElements = elements.filter((e) =>
-            extractedPages.some((p) => p.id === e.pageId)
-          );
+          const extractedPageIds = new Set(extractedPages.map((p) => p.id));
+          const relevantElements = elements.filter((e) => extractedPageIds.has(e.pageId));
           finalBlob = await stampElements(result.blob, extractedPages, relevantElements);
         } catch (e) {
           console.error("Stamping failed during extraction", e);
         }
         const a = document.createElement("a");
-        a.href = URL.createObjectURL(finalBlob);
+        const downloadUrl = URL.createObjectURL(finalBlob);
+        a.href = downloadUrl;
         a.download = `Extracted_${file.name}`;
         a.click();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
         toast.success("Pages extracted successfully!");
       }
     } catch {
@@ -858,9 +889,10 @@ export function PdfEditor({
       if (result && "blob" in result) {
         let finalBlob = result.blob;
         try {
-          const relevantElements = elements.filter((e) =>
-            extractedPages.some((p) => p.id === e.pageId)
-          );
+          // Save stamps annotations for the editor's current page set.
+          // Extraction uses its own subset in extractPages().
+          const pageIds = new Set(pages.map((p) => p.id));
+          const relevantElements = elements.filter((e) => pageIds.has(e.pageId));
           finalBlob = await stampElements(result.blob, pages, relevantElements);
         } catch (e) {
           console.error("Failed to stamp annotations", e);
@@ -1351,8 +1383,24 @@ export function PdfEditor({
                   <div
                     key={p.id}
                     onClick={(e) => handlePageClick(i, e)}
+                    draggable={mode === "reorder"}
+                    onDragStart={(event) => {
+                      if (mode !== "reorder") return;
+                      setDraggedPageId(p.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", p.id);
+                    }}
+                    onDragEnd={() => setDraggedPageId(null)}
+                    onDragOver={(event) => {
+                      if (mode === "reorder") event.preventDefault();
+                    }}
+                    onDrop={(event) => {
+                      if (mode === "reorder") handlePageDrop(i, event);
+                    }}
                     className={cn(
                       "group relative rounded-md border p-1.5 transition-all cursor-pointer flex gap-2 items-center",
+                      mode === "reorder" && "cursor-grab active:cursor-grabbing",
+                      draggedPageId === p.id && "opacity-40",
                       current === i
                         ? "border-[#DC2626] bg-red-50/60 dark:bg-red-900/20"
                         : searchMatchPages.has(i)
@@ -1387,6 +1435,28 @@ export function PdfEditor({
                         {i + 1}
                       </span>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {mode === "reorder" && (
+                          <>
+                            <button
+                              onClick={(e: ReactMouseEvent) => { e.stopPropagation(); movePage(i, i - 1); }}
+                              disabled={i === 0}
+                              className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
+                              title="Move page up"
+                              aria-label={`Move page ${i + 1} up`}
+                            >
+                              <ArrowUp className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={(e: ReactMouseEvent) => { e.stopPropagation(); movePage(i, i + 1); }}
+                              disabled={i === pages.length - 1}
+                              className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
+                              title="Move page down"
+                              aria-label={`Move page ${i + 1} down`}
+                            >
+                              <ArrowDown className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
                         <button
                           onClick={(e: ReactMouseEvent) => { e.stopPropagation(); duplicatePage(i); }}
                           className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100"
@@ -1975,6 +2045,10 @@ function AnnotationLayer(props: {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [drawPoints, setDrawPoints] = useState<{ x: number; y: number }[] | null>(null);
+  // Keep the authoritative in-progress stroke outside React state. Pointer
+  // events can outpace rendering, especially with a pen, and state alone can
+  // otherwise lose the last segment when pointerup arrives.
+  const drawStateRef = useRef<{ pointerId: number; points: { x: number; y: number }[] } | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const dragStateRef = useRef<{ startPt?: { x: number; y: number }, isErasing?: boolean } | null>(null);
   const moveStateRef = useRef<{ ids: string[]; offsets: Record<string, { x: number; y: number }> } | null>(null);
@@ -2205,16 +2279,24 @@ function AnnotationLayer(props: {
     }
 
     dragStateRef.current = { startPt: pt };
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    if (props.activeTool === "draw") setDrawPoints([pt]);
+    layerRef.current?.setPointerCapture(e.pointerId);
+    if (props.activeTool === "draw") {
+      drawStateRef.current = { pointerId: e.pointerId, points: [pt] };
+      setDrawPoints([pt]);
+    }
     else setDraft({ x: pt.x, y: pt.y, w: 0, h: 0 });
 
     function onMove(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return;
       const p = toPt(ev.clientX, ev.clientY);
       if (props.activeTool === "draw") {
-        flushSync(() => {
-          setDrawPoints((pts) => (pts ? [...pts, p] : [p]));
-        });
+        const stroke = drawStateRef.current;
+        if (!stroke || stroke.pointerId !== ev.pointerId) return;
+        const previous = stroke.points[stroke.points.length - 1];
+        // Discard duplicate pointer samples without changing the path shape.
+        if (previous && Math.hypot(previous.x - p.x, previous.y - p.y) < 0.15) return;
+        stroke.points.push(p);
+        setDrawPoints([...stroke.points]);
       } else {
         const start = dragStateRef.current!.startPt;
         if (start) {
@@ -2228,19 +2310,22 @@ function AnnotationLayer(props: {
       }
     }
     function onUp(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      (e.target as Element).releasePointerCapture?.(e.pointerId);
+      if (layerRef.current?.hasPointerCapture(e.pointerId)) layerRef.current.releasePointerCapture(e.pointerId);
       const p = toPt(ev.clientX, ev.clientY);
       const start = dragStateRef.current?.startPt ?? p;
       dragStateRef.current = null;
 
       if (props.activeTool === "draw") {
-        setDrawPoints((pts) => {
-          if (pts && pts.length > 1) {
-            const xs = pts.map((pp) => pp.x);
-            const ys = pts.map((pp) => pp.y);
+        const points = drawStateRef.current?.pointerId === e.pointerId ? drawStateRef.current.points : [];
+        drawStateRef.current = null;
+        setDrawPoints(null);
+        if (points.length > 1) {
+            const xs = points.map((pp) => pp.x);
+            const ys = points.map((pp) => pp.y);
             const minX = Math.min(...xs),
               minY = Math.min(...ys),
               maxX = Math.max(...xs),
@@ -2257,11 +2342,9 @@ function AnnotationLayer(props: {
               rotation: 0,
               stroke: props.brushColor,
               strokeWidth: props.brushSize,
-              points: pts.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })),
+              points: points.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })),
             } as DrawElement);
-          }
-          return null;
-        });
+        }
         return;
       }
 
