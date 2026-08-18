@@ -2555,6 +2555,11 @@ function AnnotationLayer(props: {
           opacity: el.opacity,
           transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
           transformOrigin: "center center",
+          // Creation tools must receive pointer events from the page layer even
+          // when the pointer is over an existing annotation. Otherwise an
+          // element's move handler intercepts the event (and stops bubbling),
+          // so a new stroke cannot begin inside a circle, rectangle, or image.
+          pointerEvents: props.activeTool === "select" ? "auto" : "none",
           touchAction: "none",
         };
 
