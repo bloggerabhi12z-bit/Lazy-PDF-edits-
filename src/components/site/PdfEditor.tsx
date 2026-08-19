@@ -18,6 +18,7 @@ import {
   Loader2, Lock, Maximize2, MessageSquare, MoreHorizontal, MousePointer2,
   PenLine, PenTool, Plus, Redo2, RotateCw, Search, Square, Star,
   Trash2, Triangle, Type, Underline as UnderlineIcon, Undo2, X, ChevronDown, Minus,
+  Layers, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/download";
@@ -148,6 +149,7 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
   
   const [drawStroke, setDrawStroke] = useState<{ color: string; width: number }>({ color: "#DC2626", width: 2 });
   const [eraserSize, setEraserSize] = useState(15);
+  
   const BRUSH_PRESETS = [
     { label: "Fine", size: 1 },
     { label: "Small", size: 2 },
@@ -166,6 +168,7 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
     { label: "Purple", value: "#D8B4FE" },
   ];
   const HIGHLIGHT_OPACITIES = [0.2, 0.3, 0.4, 0.5, 0.6];
+  
   const [recentColors, setRecentColors] = useState<string[]>([]);
   const pushRecentColor = useCallback((color: string) => {
     setRecentColors((prev) => [color, ...prev.filter((c) => c !== color)].slice(0, 8));
@@ -186,6 +189,7 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
       document.head.appendChild(link);
     }
   }, []);
+  
   const [showMoreTools, setShowMoreTools] = useState(false);
   const moreBtnRef = useRef<HTMLDivElement | null>(null);
   const shapeBtnRef = useRef<HTMLDivElement | null>(null);
@@ -309,9 +313,11 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
     setElements((es) => [...es, el]);
     setSelectedIds(new Set([el.id]));
   }, []);
+  
   const finishOneShotTool = useCallback(() => {
     setActiveTool("select");
   }, []);
+  
   const addElement = useCallback((el: AnyElement) => {
     addElementKeepTool(el);
     finishOneShotTool();
@@ -561,7 +567,7 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
             <span className="text-xs text-gray-400 w-6 tabular-nums">{drawStroke.width}px</span>
           </div>
         )}
-        
+
         {/* Eraser settings inline */}
         {activeTool === "eraser" && (
           <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700 flex-wrap">
@@ -602,6 +608,26 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
         </div>
       </div>
 
+      <TopPropertyToolbar
+        activeTool={activeTool}
+        selectedElements={selectedElements}
+        singleSelected={singleSelected}
+        drawStroke={drawStroke} setDrawStroke={setDrawStroke}
+        eraserSize={eraserSize} setEraserSize={setEraserSize}
+        highlightSettings={highlightSettings} setHighlightSettings={setHighlightSettings}
+        shapeDefaults={shapeDefaults} setShapeDefaults={setShapeDefaults}
+        recentColors={recentColors} pushRecentColor={pushRecentColor}
+        onUpdateElement={updateElement}
+        onUpdateElements={(patch) => updateElements(selectedIds, () => patch)}
+        onDeleteElements={() => deleteElements(selectedIds)}
+        onDuplicateElements={() => duplicateElements(selectedIds)}
+        onBringForward={() => reorderZ(selectedIds, "forward")}
+        onSendBackward={() => reorderZ(selectedIds, "backward")}
+        onBringToFront={() => reorderZ(selectedIds, "front")}
+        onSendToBack={() => reorderZ(selectedIds, "back")}
+        textPreviewFonts={textPreviewFonts} onSetPreviewFont={setPreviewFont}
+        onImageReplace={() => imageInputRef.current?.click()}/>
+
       {/* Portals */}
       {typeof document !== "undefined" && createPortal(
         <>
@@ -627,32 +653,6 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
                     <span className="leading-none text-center">{s.label}</span>
                   </button>
                 ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Properties Floating Panel */}
-          <AnimatePresence>
-            {(selectedIds.size > 0 || activeTool === "eraser") && (
-              <motion.div 
-                initial={{ opacity: 0, y: -4, scale: 0.95 }} 
-                animate={{ opacity: 1, y: 0, scale: 1 }} 
-                exit={{ opacity: 0, y: -4, scale: 0.95 }} 
-                style={{ position: "fixed", top: 64, right: 16 }} 
-                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl w-64 z-[10000] overflow-hidden"
-              >
-                <div className="max-h-[80vh] overflow-y-auto">
-                  <ContextPropertiesPanel selectedElements={selectedElements} singleSelected={singleSelected} activeTool={activeTool}
-                    eraserSize={eraserSize} onEraserSizeChange={setEraserSize}
-                    onUpdateElement={updateElement} onUpdateElements={(patch) => updateElements(selectedIds, () => patch)}
-                    onDeleteElements={() => deleteElements(selectedIds)} onDuplicateElements={() => duplicateElements(selectedIds)}
-                    onImageReplace={() => imageInputRef.current?.click()}
-                    onBringToFront={() => reorderZ(selectedIds, "front")} onSendToBack={() => reorderZ(selectedIds, "back")}
-                    onRotatePage={() => rotatePage(current, 90)} onDuplicatePage={() => duplicatePage(current)}
-                    onExtractPage={() => {}}
-                    textPreviewFonts={textPreviewFonts} onSetPreviewFont={setPreviewFont}
-                  />
-                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -746,6 +746,225 @@ function ToolBtn({ icon, label, active, disabled, onClick }: { icon: React.React
   );
 }
 function Divider() { return <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />; }
+
+function TopPropertyToolbar({
+  activeTool, selectedElements, singleSelected, drawStroke, setDrawStroke,
+  eraserSize, setEraserSize, highlightSettings, setHighlightSettings,
+  shapeDefaults, setShapeDefaults, recentColors, pushRecentColor,
+  onUpdateElement, onUpdateElements, onDeleteElements, onDuplicateElements,
+  onBringForward, onSendBackward, onBringToFront, onSendToBack,
+  textPreviewFonts, onSetPreviewFont, onImageReplace,
+}: {
+  activeTool: Tool;
+  selectedElements: AnyElement[];
+  singleSelected: AnyElement | null;
+  drawStroke: { color: string; width: number };
+  setDrawStroke: (fn: (s: { color: string; width: number }) => { color: string; width: number }) => void;
+  eraserSize: number;
+  setEraserSize: (n: number) => void;
+  highlightSettings: { color: string; opacity: number };
+  setHighlightSettings: (fn: (s: { color: string; opacity: number }) => { color: string; opacity: number }) => void;
+  shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
+  setShapeDefaults: (fn: (s: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" }) => { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" }) => void;
+  recentColors: string[];
+  pushRecentColor: (c: string) => void;
+  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
+  onUpdateElements: (patch: Partial<AnyElement>) => void;
+  onDeleteElements: () => void;
+  onDuplicateElements: () => void;
+  onBringForward: () => void;
+  onSendBackward: () => void;
+  onBringToFront: () => void;
+  onSendToBack: () => void;
+  textPreviewFonts: Record<string, string>;
+  onSetPreviewFont: (id: string, family: string) => void;
+  onImageReplace: () => void;
+}) {
+  const BRUSH_PRESETS = [1, 2, 4, 8, 12, 20];
+  const QUICK_COLORS = ["#000000", "#DC2626", "#2563EB", "#16A34A", "#EAB308", "#9333EA", "#EA580C"];
+  const ERASER_PRESETS = [5, 10, 15, 20, 30, 40, 60];
+  const HIGHLIGHT_COLORS = [
+    { label: "Yellow", value: "#FDE047" }, { label: "Green", value: "#86EFAC" },
+    { label: "Blue", value: "#93C5FD" }, { label: "Pink", value: "#F9A8D4" },
+    { label: "Orange", value: "#FDBA74" }, { label: "Purple", value: "#D8B4FE" },
+  ];
+  const HIGHLIGHT_OPACITIES = [0.2, 0.3, 0.4, 0.5, 0.6];
+  const filledShapeTypes = ["rect", "ellipse", "triangle", "star", "rounded-rect", "speech"];
+
+  const hasSelection = selectedElements.length > 0;
+  const showDrawRow = activeTool === "draw" && !hasSelection;
+  const showEraserRow = activeTool === "eraser" && !hasSelection;
+  const showHighlightRow = activeTool === "highlight" && !hasSelection;
+  const showShapeCreateRow = activeTool.startsWith("shape-") && !hasSelection;
+
+  if (!showDrawRow && !showEraserRow && !showHighlightRow && !showShapeCreateRow && !hasSelection) return null;
+
+  const wrap = "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-x-auto z-20";
+
+  function SwatchRow({ colors, value, onPick }: { colors: string[]; value: string; onPick: (c: string) => void }) {
+    return (
+      <div className="flex items-center gap-1 shrink-0">
+        {colors.map((c) => (
+          <button key={c} onClick={() => onPick(c)} title={c}
+            className={cn("w-5 h-5 rounded-full border-2 shrink-0", value === c ? "border-[#DC2626]" : "border-gray-200 dark:border-gray-700")}
+            style={{ background: c }} />
+        ))}
+      </div>
+    );
+  }
+
+  function SizeDots({ sizes, value, onPick, max = 20 }: { sizes: number[]; value: number; onPick: (n: number) => void; max?: number }) {
+    return (
+      <div className="flex items-center gap-1 shrink-0">
+        {sizes.map((sz) => (
+          <button key={sz} onClick={() => onPick(sz)} title={`${sz}px`}
+            className={cn("w-7 h-7 rounded-md flex items-center justify-center border shrink-0", value === sz ? "border-[#DC2626] bg-red-50 dark:bg-red-900/30" : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800")}>
+            <span className="rounded-full bg-current" style={{ width: Math.min(sz, max), height: Math.min(sz, max) }} />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function LayerButtons({ multi }: { multi: boolean }) {
+    return (
+      <div className="flex items-center gap-1 shrink-0 pl-2 ml-1 border-l border-gray-200 dark:border-gray-700">
+        <button onClick={onSendBackward} title="Send backward" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ArrowDown className="w-3.5 h-3.5" /></button>
+        <button onClick={onBringForward} title="Bring forward" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ArrowUp className="w-3.5 h-3.5" /></button>
+        <button onClick={onSendToBack} title="Send to back" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ChevronsDown className="w-3.5 h-3.5" /></button>
+        <button onClick={onBringToFront} title="Bring to front" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ChevronsUp className="w-3.5 h-3.5" /></button>
+        <button onClick={onDuplicateElements} title="Duplicate" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><Copy className="w-3.5 h-3.5" /></button>
+        <button onClick={onDeleteElements} title="Delete" className="p-1.5 rounded-md hover:bg-red-50 text-gray-500 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+        {multi && <span className="text-xs text-gray-400 pl-1">{selectedElements.length} selected</span>}
+      </div>
+    );
+  }
+
+  // Creation-mode rows (no selection)
+  if (showDrawRow) {
+    return (
+      <div className={wrap}>
+        <input type="color" value={drawStroke.color} onChange={(e) => { setDrawStroke((s) => ({ ...s, color: e.target.value })); pushRecentColor(e.target.value); }} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
+        <SwatchRow colors={QUICK_COLORS} value={drawStroke.color} onPick={(c) => setDrawStroke((s) => ({ ...s, color: c }))} />
+        {recentColors.length > 0 && <SwatchRow colors={recentColors.slice(0, 4)} value={drawStroke.color} onPick={(c) => setDrawStroke((s) => ({ ...s, color: c }))} />}
+        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
+        <SizeDots sizes={BRUSH_PRESETS} value={drawStroke.width} onPick={(n) => setDrawStroke((s) => ({ ...s, width: n }))} />
+        <input type="range" min={1} max={30} value={drawStroke.width} onChange={(e) => setDrawStroke((s) => ({ ...s, width: Number(e.target.value) }))} className="w-16 accent-[#DC2626] shrink-0" />
+        <span className="text-xs text-gray-400 w-8 shrink-0 tabular-nums">{drawStroke.width}px</span>
+      </div>
+    );
+  }
+  if (showEraserRow) {
+    return (
+      <div className={wrap}>
+        <SizeDots sizes={ERASER_PRESETS} value={eraserSize} onPick={setEraserSize} max={18} />
+        <input type="range" min={5} max={60} value={eraserSize} onChange={(e) => setEraserSize(Number(e.target.value))} className="w-16 accent-[#DC2626] shrink-0" />
+        <span className="text-xs text-gray-400 w-8 shrink-0 tabular-nums">{eraserSize}px</span>
+      </div>
+    );
+  }
+  if (showHighlightRow) {
+    return (
+      <div className={wrap}>
+        {HIGHLIGHT_COLORS.map((c) => (
+          <button key={c.value} onClick={() => setHighlightSettings((s) => ({ ...s, color: c.value }))} title={c.label}
+            className={cn("w-6 h-6 rounded-full border-2 shrink-0", highlightSettings.color === c.value ? "border-[#DC2626]" : "border-gray-200 dark:border-gray-700")}
+            style={{ background: c.value }} />
+        ))}
+        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
+        <select value={highlightSettings.opacity} onChange={(e) => setHighlightSettings((s) => ({ ...s, opacity: Number(e.target.value) }))}
+          className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0">
+          {HIGHLIGHT_OPACITIES.map((o) => <option key={o} value={o}>{Math.round(o * 100)}%</option>)}
+        </select>
+      </div>
+    );
+  }
+  if (showShapeCreateRow) {
+    return (
+      <div className={wrap}>
+        <SizeDots sizes={[1, 2, 4, 8, 12, 20]} value={shapeDefaults.strokeWidth} onPick={(n) => setShapeDefaults((s) => ({ ...s, strokeWidth: n }))} />
+        <input type="color" value={shapeDefaults.stroke} onChange={(e) => setShapeDefaults((s) => ({ ...s, stroke: e.target.value }))} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" title="Stroke color" />
+        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
+        <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300 shrink-0">
+          <input type="checkbox" checked={shapeDefaults.fill === null} onChange={(e) => setShapeDefaults((s) => ({ ...s, fill: e.target.checked ? null : "#ffffff" }))} className="accent-[#DC2626]" /> No fill
+        </label>
+        {shapeDefaults.fill !== null && <input type="color" value={shapeDefaults.fill} onChange={(e) => setShapeDefaults((s) => ({ ...s, fill: e.target.value }))} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" title="Fill color" />}
+        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
+        <select value={shapeDefaults.dash} onChange={(e) => setShapeDefaults((s) => ({ ...s, dash: e.target.value as any }))} className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0">
+          <option value="solid">Solid</option>
+          <option value="dashed">Dashed</option>
+          <option value="dotted">Dotted</option>
+        </select>
+      </div>
+    );
+  }
+
+  // Selection-mode row
+  if (!singleSelected && selectedElements.length > 1) {
+    return (
+      <div className={wrap}>
+        <input type="range" min={0.1} max={1} step={0.05} onChange={(e) => onUpdateElements({ opacity: Number(e.target.value) })} className="w-16 accent-[#DC2626] shrink-0" title="Opacity" />
+        <LayerButtons multi />
+      </div>
+    );
+  }
+  if (singleSelected) {
+    const el = singleSelected;
+    const isShape = ["rect", "ellipse", "line", "arrow", "triangle", "star", "rounded-rect", "speech"].includes(el.type);
+    return (
+      <div className={wrap}>
+        {el.type === "text" && (
+          <>
+            <select value={textPreviewFonts[el.id] || (el as TextElement).font} onChange={(e) => onSetPreviewFont(el.id, e.target.value)} className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0 max-w-[120px]">
+              {FONT_PREVIEW_CHOICES.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+            <input type="number" min={6} max={96} value={(el as TextElement).fontSize} onChange={(e) => onUpdateElement(el.id, { fontSize: Number(e.target.value) })} className="w-12 h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center shrink-0" />
+            <button onClick={() => onUpdateElement(el.id, { bold: !(el as TextElement).bold })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).bold ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><Bold className="w-3.5 h-3.5" /></button>
+            <button onClick={() => onUpdateElement(el.id, { italic: !(el as TextElement).italic })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).italic ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><Italic className="w-3.5 h-3.5" /></button>
+            <button onClick={() => onUpdateElement(el.id, { underline: !(el as TextElement).underline })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).underline ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><UnderlineIcon className="w-3.5 h-3.5" /></button>
+            {[["left", AlignLeft], ["center", AlignCenter], ["right", AlignRight]].map(([a, Icon]: any) => (
+              <button key={a} onClick={() => onUpdateElement(el.id, { align: a })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).align === a ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><Icon className="w-3.5 h-3.5" /></button>
+            ))}
+            <input type="color" value={(el as TextElement).color} onChange={(e) => onUpdateElement(el.id, { color: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
+          </>
+        )}
+        {el.type === "image" && (
+          <button onClick={onImageReplace} className="h-7 px-2 text-xs rounded-md border border-gray-300 dark:border-gray-600 shrink-0">Replace image</button>
+        )}
+        {(el.type === "draw" || isShape) && (
+          <>
+            <input type="number" min={1} max={30} value={(el as DrawElement | ShapeElement).strokeWidth} onChange={(e) => onUpdateElement(el.id, { strokeWidth: Number(e.target.value) })} className="w-12 h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center shrink-0" title="Stroke width" />
+            <input type="color" value={(el as DrawElement | ShapeElement).stroke} onChange={(e) => onUpdateElement(el.id, { stroke: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" title="Stroke color" />
+            {isShape && filledShapeTypes.includes(el.type) && (
+              <>
+                <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300 shrink-0">
+                  <input type="checkbox" checked={(el as ShapeElement).fill === null} onChange={(e) => onUpdateElement(el.id, { fill: e.target.checked ? null : "#ffffff" })} className="accent-[#DC2626]" /> No fill
+                </label>
+                {(el as ShapeElement).fill !== null && <input type="color" value={(el as ShapeElement).fill ?? "#ffffff"} onChange={(e) => onUpdateElement(el.id, { fill: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />}
+                <select value={(el as any).dash ?? "solid"} onChange={(e) => onUpdateElement(el.id, { dash: e.target.value } as any)} className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0">
+                  <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+                </select>
+              </>
+            )}
+          </>
+        )}
+        {["highlight", "underline", "strikeout", "squiggly"].includes(el.type) && (
+          <input type="color" value={(el as HighlightElement).color} onChange={(e) => onUpdateElement(el.id, { color: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
+        )}
+        {el.type === "sticky" && (
+          <input type="color" value={(el as StickyElement).color} onChange={(e) => onUpdateElement(el.id, { color: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
+        )}
+        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
+        <input type="range" min={0.1} max={1} step={0.05} value={el.opacity} onChange={(e) => onUpdateElement(el.id, { opacity: Number(e.target.value) })} className="w-14 accent-[#DC2626] shrink-0" title="Opacity" />
+        {ROTATABLE_TYPES.has(el.type) && (
+          <input type="range" min={0} max={359} value={el.rotation} onChange={(e) => onUpdateElement(el.id, { rotation: Number(e.target.value) })} className="w-14 accent-[#DC2626] shrink-0" title="Rotation" />
+        )}
+        <LayerButtons multi={false} />
+      </div>
+    );
+  }
+  return null;
+}
 
 /* =========================================================  PREVIEW CANVAS  ========================================================= */
 function PreviewCanvas(props: {
@@ -1196,170 +1415,6 @@ function AnnotationLayer(props: {
   );
 }
 
-/* =========================================================  PROPERTIES PANEL  ========================================================= */
-function ContextPropertiesPanel({ selectedElements, singleSelected, activeTool, eraserSize, onEraserSizeChange, onUpdateElement, onUpdateElements, onDeleteElements, onDuplicateElements, onImageReplace, onBringToFront, onSendToBack, onRotatePage, onDuplicatePage, onExtractPage, textPreviewFonts, onSetPreviewFont }: {
-  selectedElements: AnyElement[]; singleSelected: AnyElement | null; activeTool: Tool;
-  eraserSize: number; onEraserSizeChange: (n: number) => void;
-  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
-  onUpdateElements: (patch: Partial<AnyElement>) => void;
-  onDeleteElements: () => void; onDuplicateElements: () => void; onImageReplace: () => void;
-  onBringToFront: () => void; onSendToBack: () => void;
-  onRotatePage: () => void; onDuplicatePage: () => void; onExtractPage: () => void;
-  textPreviewFonts: Record<string, string>; onSetPreviewFont: (id: string, family: string) => void;
-}) {
-  const colorSwatches = ["#000000","#FFFFFF","#DC2626","#2563EB","#16A34A","#EAB308","#9333EA","#6B7280"];
-  const filledShapes = ["rect","ellipse","triangle","star","rounded-rect","speech"];
-
-  if (activeTool === "eraser") {
-    return (
-      <div className="p-4 space-y-4">
-        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-800 pb-2">Eraser</h3>
-        <PropRow label="Eraser radius (PDF units)">
-          <div className="flex items-center gap-2">
-            <input type="range" min={5} max={60} value={eraserSize} onChange={(e) => onEraserSizeChange(Number(e.target.value))} className="flex-1 accent-[#DC2626]" />
-            <span className="text-xs text-gray-500 w-5">{eraserSize}</span>
-          </div>
-        </PropRow>
-        <p className="text-xs text-gray-400 leading-relaxed">Drag over freehand strokes to partially erase them. Other elements are unaffected.</p>
-      </div>
-    );
-  }
-
-  if (selectedElements.length > 1) {
-    return (
-      <div className="p-4 space-y-5">
-        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-800 pb-2">{selectedElements.length} elements selected</h3>
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" size="sm" onClick={onDuplicateElements} className="rounded-md text-xs h-8"><Copy className="w-3.5 h-3.5 mr-1.5" /> Duplicate</Button>
-          <Button variant="outline" size="sm" onClick={onDeleteElements} className="rounded-md text-xs h-8 border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5 mr-1.5" /> Delete</Button>
-        </div>
-        <PropRow label="Layer order"><div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={onBringToFront} className="rounded-md text-xs h-8">Bring forward</Button><Button variant="outline" size="sm" onClick={onSendToBack} className="rounded-md text-xs h-8">Send back</Button></div></PropRow>
-        <PropRow label="Opacity"><input type="range" min={0.1} max={1} step={0.05} onChange={(e) => onUpdateElements({ opacity: Number(e.target.value) })} className="w-full accent-[#DC2626]" /></PropRow>
-      </div>
-    );
-  }
-
-  if (singleSelected) {
-    const el = singleSelected;
-    const isShape = ["rect","ellipse","line","arrow","triangle","star","rounded-rect","speech"].includes(el.type);
-    const title = el.type === "text" ? "Text" : el.type === "image" ? "Image" : el.type === "draw" ? "Drawing" : isShape ? "Shape" : el.type === "sticky" ? "Sticky note" : ["highlight","underline","strikeout","squiggly"].includes(el.type) ? "Highlight" : "Element";
-
-    return (
-      <div className="p-4 space-y-5">
-        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
-          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{title}</h3>
-          <div className="flex items-center gap-0.5">
-            <button onClick={onDuplicateElements} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500" title="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
-            <button onClick={onDeleteElements} className="p-1.5 rounded hover:bg-red-50 text-gray-500 hover:text-red-600" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
-          </div>
-        </div>
-
-        {el.type === "text" && (
-          <div className="space-y-4">
-            <div>
-              <div className="text-xs font-medium text-gray-500 mb-1.5">Font style</div>
-              <select value={textPreviewFonts[el.id] || (el as TextElement).font} onChange={(e) => onSetPreviewFont(el.id, e.target.value)} className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-800 dark:text-gray-100 focus:outline-none focus:border-[#DC2626]">
-                <optgroup label="Standard">{SYSTEM_FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}</optgroup>
-                <optgroup label="Google Fonts">{GOOGLE_FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}</optgroup>
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <select value={(el as TextElement).font} onChange={(e) => onUpdateElement(el.id, { font: e.target.value as TextElement["font"] })} className="flex-1 h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-800 dark:text-gray-100 focus:outline-none focus:border-[#DC2626]">
-                {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f === "TimesRoman" ? "Times New Roman" : f} (PDF)</option>)}
-              </select>
-              <input type="number" min={6} max={96} value={(el as TextElement).fontSize} onChange={(e) => onUpdateElement(el.id, { fontSize: Number(e.target.value) })} className="w-14 h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center focus:outline-none focus:border-[#DC2626]" />
-            </div>
-            <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-800 p-1 rounded-md border border-gray-200 dark:border-gray-700">
-              {[["bold","B",Bold],["italic","I",Italic],["underline","U",UnderlineIcon]].map(([k, , Icon]: any) => (
-                <button key={k} onClick={() => onUpdateElement(el.id, { [k]: !(el as TextElement)[k as keyof TextElement] })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement)[k as keyof TextElement] ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500")}><Icon className="w-3.5 h-3.5" /></button>
-              ))}
-            </div>
-            <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-800 p-1 rounded-md border border-gray-200 dark:border-gray-700">
-              {[["left",AlignLeft],["center",AlignCenter],["right",AlignRight]].map(([a, Icon]: any) => (
-                <button key={a} onClick={() => onUpdateElement(el.id, { align: a })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).align === a ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500")}><Icon className="w-3.5 h-3.5" /></button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {el.type === "image" && <Button onClick={onImageReplace} variant="outline" className="w-full rounded-md text-xs h-8">Replace image</Button>}
-
-        {(el.type === "draw" || isShape) && (
-          <div className="space-y-4">
-            <PropRow label="Stroke width"><input type="number" min={1} max={20} value={(el as DrawElement | ShapeElement).strokeWidth} onChange={(e) => onUpdateElement(el.id, { strokeWidth: Number(e.target.value) })} className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs outline-none focus:border-[#DC2626]" /></PropRow>
-            {isShape && filledShapes.includes(el.type) && (
-              <PropRow label="Fill color">
-                <div className="flex items-center gap-2">
-                  <input type="color" value={(el as ShapeElement).fill ?? "#ffffff"} onChange={(e) => onUpdateElement(el.id, { fill: e.target.value })} className="w-8 h-8 rounded cursor-pointer border border-gray-200 p-0.5" />
-                  <label className="flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" checked={(el as ShapeElement).fill === null} onChange={(e) => onUpdateElement(el.id, { fill: e.target.checked ? null : "#ffffff" })} className="accent-[#DC2626]" /> No fill</label>
-                </div>
-              </PropRow>
-            )}
-            {isShape && (
-              <PropRow label="Dash style">
-                <select value={(el as ShapeElement & { dash?: "solid" | "dashed" | "dotted" }).dash || "solid"} onChange={(e) => onUpdateElement(el.id, { dash: e.target.value } as any)} className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs focus:outline-none focus:border-[#DC2626]">
-                  <option value="solid">Solid</option>
-                  <option value="dashed">Dashed</option>
-                  <option value="dotted">Dotted</option>
-                </select>
-              </PropRow>
-            )}
-          </div>
-        )}
-
-        {el.type !== "image" && (
-          <PropRow label="Color">
-            <div className="flex items-center gap-2">
-              <input type="color" value={(el as TextElement).color || (el as ShapeElement).stroke || (el as HighlightElement).color || "#000000"}
-                onChange={(e) => {
-                  if (el.type === "text" || el.type.startsWith("field-") || ["squiggly","strikeout","underline","highlight"].includes(el.type)) onUpdateElement(el.id, { color: e.target.value });
-                  else onUpdateElement(el.id, { stroke: e.target.value });
-                }} className="w-8 h-8 rounded-full cursor-pointer border border-gray-200 p-0.5 shrink-0" />
-              <div className="flex-1 flex flex-wrap gap-1.5">
-                {colorSwatches.map((color) => (
-                  <button key={color} onClick={() => {
-                    if (el.type === "text" || el.type.startsWith("field-") || ["squiggly","strikeout","underline","highlight"].includes(el.type)) onUpdateElement(el.id, { color });
-                    else onUpdateElement(el.id, { stroke: color });
-                  }} className="w-5 h-5 rounded-full border border-gray-200 hover:scale-110 transition-transform" style={{ background: color }} />
-                ))}
-              </div>
-            </div>
-          </PropRow>
-        )}
-
-        <PropRow label="Opacity"><input type="range" min={0.1} max={1} step={0.05} value={el.opacity} onChange={(e) => onUpdateElement(el.id, { opacity: Number(e.target.value) })} className="w-full accent-[#DC2626]" /></PropRow>
-        {el.type !== "draw" && el.type !== "sticky" && !el.type.startsWith("field-") && !["highlight","underline","strikeout","squiggly"].includes(el.type) && (
-          <PropRow label="Rotation">
-            <div className="flex items-center gap-2">
-              <input type="range" min={0} max={359} value={el.rotation} onChange={(e) => onUpdateElement(el.id, { rotation: Number(e.target.value) })} className="flex-1 accent-[#DC2626]" />
-              <span className="text-xs text-gray-500 w-9 text-right tabular-nums">{el.rotation}°</span>
-            </div>
-          </PropRow>
-        )}
-        <PropRow label="Layer order"><div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={onBringToFront} className="rounded-md text-xs h-8">Bring forward</Button><Button variant="outline" size="sm" onClick={onSendToBack} className="rounded-md text-xs h-8">Send back</Button></div></PropRow>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4 space-y-5">
-      <div><h3 className="text-sm font-semibold mb-1">Edit PDF</h3><p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">Use the toolbar to add text, images, and annotations. Select any element to edit its properties here.</p></div>
-      <div>
-        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Page actions</h4>
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          <Button variant="outline" size="sm" onClick={onRotatePage} className="rounded-md text-xs h-8"><RotateCw className="w-3.5 h-3.5 mr-1.5" /> Rotate</Button>
-          <Button variant="outline" size="sm" onClick={onDuplicatePage} className="rounded-md text-xs h-8"><Copy className="w-3.5 h-3.5 mr-1.5" /> Duplicate</Button>
-        </div>
-        <Button variant="outline" size="sm" onClick={onExtractPage} className="w-full rounded-md text-xs h-8"><Download className="w-3.5 h-3.5 mr-1.5" /> Extract current page</Button>
-      </div>
-    </div>
-  );
-}
-
-function PropRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{label}</div>{children}</div>;
-}
-
 /* =========================================================  SIGNATURE MODAL  ========================================================= */
 function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: {
   onInsert: (src: string, save: boolean) => void; onCancel: () => void;
@@ -1372,9 +1427,11 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
   const [sigSize, setSigSize] = useState(52);
   const [saveAfterInsert, setSaveAfterInsert] = useState(true);
   const [hasDrawing, setHasDrawing] = useState(false);
+  
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawing = useRef(false);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
+  const lastPoint = useRef<{ x: number; y: number } | null>(null);
+  const dprRef = useRef(1);
 
   useEffect(() => {
     SIG_FONTS.forEach(({ family }) => {
@@ -1385,51 +1442,90 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
     });
   }, []);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+    dprRef.current = dpr;
+    const cssW = canvas.clientWidth || 460;
+    const cssH = canvas.clientHeight || 160;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.scale(dpr, dpr);
+  }, []);
+
   function getPointerPos(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) };
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.preventDefault();
-    const canvas = canvasRef.current; if (!canvas) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     canvas.setPointerCapture(e.pointerId);
     isDrawing.current = true;
     const pos = getPointerPos(e);
-    lastPos.current = pos;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.strokeStyle = sigColor; ctx.fillStyle = sigColor;
-    ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    lastPoint.current = pos;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.strokeStyle = sigColor;
+    ctx.fillStyle = sigColor;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 1.5, 0, Math.PI * 2);
+    ctx.arc(pos.x, pos.y, 1.25, 0, Math.PI * 2);
     ctx.fill();
     setHasDrawing(true);
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!isDrawing.current || !lastPos.current) return;
+    if (!isDrawing.current || !lastPoint.current) return;
     e.preventDefault();
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     const pos = getPointerPos(e);
-    const midX = (lastPos.current.x + pos.x) / 2;
-    const midY = (lastPos.current.y + pos.y) / 2;
+    const prev = lastPoint.current;
+    const midX = (prev.x + pos.x) / 2;
+    const midY = (prev.y + pos.y) / 2;
     ctx.strokeStyle = sigColor;
-    ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.quadraticCurveTo(lastPos.current.x, lastPos.current.y, midX, midY);
+    ctx.moveTo(prev.x, prev.y);
+    ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
     ctx.stroke();
-    lastPos.current = pos;
+    lastPoint.current = pos;
   }
 
-  function onPointerUp() { isDrawing.current = false; lastPos.current = null; }
+  function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
+    isDrawing.current = false;
+    lastPoint.current = null;
+    const canvas = canvasRef.current;
+    if (canvas && e.pointerId != null) {
+      try { canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    }
+  }
+
+  function onPointerCancel() {
+    isDrawing.current = false;
+    lastPoint.current = null;
+  }
 
   function clearCanvas() {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width / dprRef.current, canvas.height / dprRef.current);
     setHasDrawing(false);
   }
 
@@ -1467,10 +1563,15 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
 
         {tab === "draw" && (
           <div>
-            <canvas ref={canvasRef} width={460} height={160}
-              className="w-full cursor-crosshair rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+            <canvas
+              ref={canvasRef}
+              className="w-full h-40 cursor-crosshair rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
               style={{ touchAction: "none" }}
-              onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerLeave={onPointerUp}
+              onPointerCancel={onPointerCancel}
             />
             <div className="mt-3 flex items-center gap-3">
               <label className="text-xs text-gray-500">Ink color</label>
