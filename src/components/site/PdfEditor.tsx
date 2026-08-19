@@ -50,6 +50,11 @@ type Tool =
   | "image" | "signature" | "whiteout" | "sticky"
   | "field-text" | "field-checkbox" | "field-radio" | "field-dropdown";
 
+const PERSISTENT_TOOLS = new Set<Tool>(["select", "hand", "draw", "eraser"]);
+function isOneShotTool(tool: Tool): boolean {
+  return !PERSISTENT_TOOLS.has(tool);
+}
+
 const MAX_HISTORY = 50;
 const NUDGE = 1, NUDGE_FAST = 10;
 
@@ -89,7 +94,6 @@ function fontFamilyStack(name: string): string {
 type HistorySnapshot = { pages: EditorPage[]; elements: AnyElement[] };
 function snapshotsEqual(a: HistorySnapshot, b: HistorySnapshot) { return JSON.stringify(a) === JSON.stringify(b); }
 
-// Partial stroke erasure: splits DrawElement point arrays at erased positions
 function eraseFromDrawElements(
   eraserPt: { x: number; y: number }, radius: number, drawEls: DrawElement[]
 ): { toRemove: string[]; toAdd: DrawElement[] } {
@@ -141,8 +145,34 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [activeShape, setActiveShape] = useState<Tool>("shape-rect");
   const [showShapePicker, setShowShapePicker] = useState(false);
+  
   const [drawStroke, setDrawStroke] = useState<{ color: string; width: number }>({ color: "#DC2626", width: 2 });
   const [eraserSize, setEraserSize] = useState(15);
+  const BRUSH_PRESETS = [
+    { label: "Fine", size: 1 },
+    { label: "Small", size: 2 },
+    { label: "Medium", size: 4 },
+    { label: "Large", size: 8 },
+    { label: "Extra Large", size: 12 },
+    { label: "Very Large", size: 20 },
+  ];
+  const ERASER_PRESETS = [5, 10, 15, 20, 30, 40, 60];
+  const HIGHLIGHT_COLORS = [
+    { label: "Yellow", value: "#FDE047" },
+    { label: "Green", value: "#86EFAC" },
+    { label: "Blue", value: "#93C5FD" },
+    { label: "Pink", value: "#F9A8D4" },
+    { label: "Orange", value: "#FDBA74" },
+    { label: "Purple", value: "#D8B4FE" },
+  ];
+  const HIGHLIGHT_OPACITIES = [0.2, 0.3, 0.4, 0.5, 0.6];
+  const [recentColors, setRecentColors] = useState<string[]>([]);
+  const pushRecentColor = useCallback((color: string) => {
+    setRecentColors((prev) => [color, ...prev.filter((c) => c !== color)].slice(0, 8));
+  }, []);
+  const [highlightSettings, setHighlightSettings] = useState<{ color: string; opacity: number }>({ color: "#FDE047", opacity: 0.35 });
+  const [shapeDefaults, setShapeDefaults] = useState<{ stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" }>({ stroke: "#DC2626", strokeWidth: 2, fill: null, dash: "solid" });
+
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
   const loadedGoogleFontsRef = useRef<Set<string>>(new Set());
@@ -275,8 +305,18 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
   const duplicatePage = useCallback((i: number) => setPages((ps) => { const out = [...ps]; out.splice(i + 1, 0, { ...ps[i], id: `${ps[i].id}-dup-${Date.now()}`, selected: false }); return out; }), []);
   const insertBlankPage = useCallback((after: number) => setPages((ps) => { const out = [...ps]; out.splice(after + 1, 0, { id: `blank-${Date.now()}`, originalIndex: -1, isBlank: true, rotation: 0, selected: false }); return out; }), []);
 
-  const addElement = useCallback((el: AnyElement) => { setElements((es) => [...es, el]); setSelectedIds(new Set([el.id])); setActiveTool("select"); }, []);
-  const addElementKeepTool = useCallback((el: AnyElement) => { setElements((es) => [...es, el]); setSelectedIds(new Set([el.id])); }, []);
+  const addElementKeepTool = useCallback((el: AnyElement) => {
+    setElements((es) => [...es, el]);
+    setSelectedIds(new Set([el.id]));
+  }, []);
+  const finishOneShotTool = useCallback(() => {
+    setActiveTool("select");
+  }, []);
+  const addElement = useCallback((el: AnyElement) => {
+    addElementKeepTool(el);
+    finishOneShotTool();
+  }, [addElementKeepTool, finishOneShotTool]);
+
   const updateElement = useCallback((id: string, patch: Partial<AnyElement>) => setElements((es) => es.map((e) => (e.id === id ? ({ ...e, ...patch } as AnyElement) : e))), []);
   const updateElements = useCallback((ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => setElements((es) => es.map((e) => (ids.has(e.id) ? ({ ...e, ...patchFn(e) } as AnyElement) : e))), []);
   const deleteElements = useCallback((ids: Set<string>) => { setElements((es) => es.filter((e) => !ids.has(e.id))); setSelectedIds(new Set()); }, []);
@@ -493,20 +533,68 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
 
         {/* Draw settings inline */}
         {activeTool === "draw" && (
-          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700">
-            <span className="text-xs text-gray-400 hidden sm:block">Ink</span>
-            <input type="color" value={drawStroke.color} onChange={(e) => setDrawStroke((s) => ({ ...s, color: e.target.value }))} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0" />
-            <input type="range" min={1} max={20} value={drawStroke.width} onChange={(e) => setDrawStroke((s) => ({ ...s, width: Number(e.target.value) }))} className="w-16 accent-[#DC2626]" />
-            <span className="text-xs text-gray-400 w-4">{drawStroke.width}</span>
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700 flex-wrap">
+            <input
+              type="color"
+              value={drawStroke.color}
+              onChange={(e) => { setDrawStroke((s) => ({ ...s, color: e.target.value })); pushRecentColor(e.target.value); }}
+              className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0"
+              title="Ink color"
+            />
+            {recentColors.length > 0 && (
+              <div className="flex items-center gap-1">
+                {recentColors.slice(0, 5).map((c) => (
+                  <button key={c} onClick={() => setDrawStroke((s) => ({ ...s, color: c }))}
+                    className="w-4 h-4 rounded-full border border-gray-300" style={{ background: c }} title={c} />
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-1">
+              {BRUSH_PRESETS.map((p) => (
+                <button key={p.label} onClick={() => setDrawStroke((s) => ({ ...s, width: p.size }))} title={`${p.label} (${p.size}px)`}
+                  className={cn("w-7 h-7 rounded-md flex items-center justify-center border", drawStroke.width === p.size ? "border-[#DC2626] bg-red-50 dark:bg-red-900/30" : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800")}>
+                  <span className="rounded-full bg-current" style={{ width: Math.min(p.size, 16), height: Math.min(p.size, 16), color: drawStroke.color }} />
+                </button>
+              ))}
+            </div>
+            <input type="range" min={1} max={30} value={drawStroke.width} onChange={(e) => setDrawStroke((s) => ({ ...s, width: Number(e.target.value) }))} className="w-16 accent-[#DC2626]" title="Custom size" />
+            <span className="text-xs text-gray-400 w-6 tabular-nums">{drawStroke.width}px</span>
           </div>
         )}
+        
+        {/* Eraser settings inline */}
         {activeTool === "eraser" && (
-          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700">
-            <span className="text-xs text-gray-400 hidden sm:block">Size</span>
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700 flex-wrap">
+            <div className="flex items-center gap-1">
+              {ERASER_PRESETS.map((sz) => (
+                <button key={sz} onClick={() => setEraserSize(sz)} title={`${sz}px`}
+                  className={cn("w-7 h-7 rounded-md flex items-center justify-center border", eraserSize === sz ? "border-[#DC2626] bg-red-50 dark:bg-red-900/30" : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800")}>
+                  <span className="rounded-full border border-current" style={{ width: Math.min(sz, 18), height: Math.min(sz, 18) }} />
+                </button>
+              ))}
+            </div>
             <input type="range" min={5} max={60} value={eraserSize} onChange={(e) => setEraserSize(Number(e.target.value))} className="w-16 accent-[#DC2626]" />
-            <span className="text-xs text-gray-400 w-4">{eraserSize}</span>
+            <span className="text-xs text-gray-400 w-6 tabular-nums">{eraserSize}px</span>
           </div>
         )}
+
+        {/* Highlight settings inline */}
+        {activeTool === "highlight" && (
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700 flex-wrap">
+            <div className="flex items-center gap-1">
+              {HIGHLIGHT_COLORS.map((c) => (
+                <button key={c.value} onClick={() => setHighlightSettings((s) => ({ ...s, color: c.value }))} title={c.label}
+                  className={cn("w-6 h-6 rounded-full border-2", highlightSettings.color === c.value ? "border-[#DC2626]" : "border-gray-200")}
+                  style={{ background: c.value }} />
+              ))}
+            </div>
+            <select value={highlightSettings.opacity} onChange={(e) => setHighlightSettings((s) => ({ ...s, opacity: Number(e.target.value) }))}
+              className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1">
+              {HIGHLIGHT_OPACITIES.map((o) => <option key={o} value={o}>{Math.round(o * 100)}%</option>)}
+            </select>
+          </div>
+        )}
+
         <div className="ml-auto sm:hidden">
           <Button onClick={apply} disabled={processing || busy} size="sm" className="h-8 rounded-md bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-xs px-3 gap-1.5">
             {processing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Save
@@ -619,6 +707,7 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
               onUpdateElements={updateElements} onDuplicateElements={duplicateElements}
               onReplaceElements={replaceElements} panStateRef={panStateRef}
               textPreviewFonts={textPreviewFonts} drawStroke={drawStroke} eraserSize={eraserSize}
+              highlightSettings={highlightSettings} shapeDefaults={shapeDefaults}
             />
           )}
           {/* BOTTOM BAR */}
@@ -671,6 +760,7 @@ function PreviewCanvas(props: {
   onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
   panStateRef: React.MutableRefObject<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; el: HTMLElement } | null>;
   textPreviewFonts: Record<string, string>; drawStroke: { color: string; width: number }; eraserSize: number;
+  highlightSettings: { color: string; opacity: number }; shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
@@ -712,6 +802,7 @@ function PreviewCanvas(props: {
             onUpdateElement={props.onUpdateElement} onUpdateElements={props.onUpdateElements}
             onDuplicateElements={props.onDuplicateElements} onReplaceElements={props.onReplaceElements}
             textPreviewFonts={props.textPreviewFonts} drawStroke={props.drawStroke} eraserSize={props.eraserSize}
+            highlightSettings={props.highlightSettings} shapeDefaults={props.shapeDefaults}
           />
         ))}
       </div>
@@ -731,6 +822,7 @@ function PagePane(props: {
   onDuplicateElements: (ids: Set<string>) => void;
   onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
   textPreviewFonts: Record<string, string>; drawStroke: { color: string; width: number }; eraserSize: number;
+  highlightSettings: { color: string; opacity: number }; shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -785,6 +877,7 @@ function PagePane(props: {
           onDuplicateElements={props.onDuplicateElements} onReplaceElements={props.onReplaceElements}
           interactive={props.activeTool !== "hand"} textPreviewFonts={props.textPreviewFonts}
           drawStroke={props.drawStroke} eraserSize={props.eraserSize}
+          highlightSettings={props.highlightSettings} shapeDefaults={props.shapeDefaults}
         />
       )}
     </div>
@@ -802,11 +895,11 @@ function AnnotationLayer(props: {
   onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
   interactive: boolean; textPreviewFonts: Record<string, string>;
   drawStroke: { color: string; width: number }; eraserSize: number;
+  highlightSettings: { color: string; opacity: number }; shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
 }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const elementsRef = useRef(props.elements);
   
-  // Track live elements for smooth erasure computation without closure staleness
   useEffect(() => { elementsRef.current = props.elements; }, [props.elements]);
 
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -882,7 +975,7 @@ function AnnotationLayer(props: {
       else if (props.activeTool === "field-checkbox") el = { ...base, type: "field-checkbox", width: 18, height: 18, name: "checkbox", checked: false, required: false } as FieldCheckboxElement;
       else if (props.activeTool === "field-radio") el = { ...base, type: "field-radio", width: 18, height: 18, groupName: "radio_group", value: "option_1", checked: false, required: false } as FieldRadioElement;
       else if (props.activeTool === "field-dropdown") el = { ...base, type: "field-dropdown", width: 160, height: 26, name: "dropdown", options: ["Option 1", "Option 2"], value: "Option 1", required: false } as FieldDropdownElement;
-      if (el) props.onAddElementKeepTool(el); return;
+      if (el) props.onAddElement(el); return;
     }
 
     // Drag-based tools
@@ -919,9 +1012,22 @@ function AnnotationLayer(props: {
 
       if (isShapeTool) {
         const flipDiag = (start.x < p.x) !== (start.y < p.y);
-        props.onAddElementKeepTool({ id: makeId("shape"), pageId: props.pageId, type: props.activeTool.replace("shape-", ""), x, y, width: w, height: h, opacity: 1, rotation: 0, stroke: "#DC2626", strokeWidth: 2, fill: null, flipDiag } as unknown as ShapeElement);
+        props.onAddElement({
+          id: makeId("shape"), pageId: props.pageId, type: props.activeTool.replace("shape-", ""),
+          x, y, width: w, height: h, opacity: 1, rotation: 0,
+          stroke: props.shapeDefaults.stroke, strokeWidth: props.shapeDefaults.strokeWidth,
+          fill: props.shapeDefaults.fill, dash: props.shapeDefaults.dash, flipDiag,
+        } as unknown as ShapeElement);
       } else if (["highlight","underline","strikeout","squiggly"].includes(props.activeTool)) {
-        props.onAddElementKeepTool({ id: makeId("markup"), pageId: props.pageId, type: props.activeTool, x, y, width: w, height: h, opacity: props.activeTool === "highlight" ? 0.35 : 1, rotation: 0, color: "#FDE047" } as HighlightElement);
+        props.onAddElement({
+          id: makeId("markup"),
+          pageId: props.pageId,
+          type: props.activeTool,
+          x, y, width: w, height: h,
+          opacity: props.activeTool === "highlight" ? props.highlightSettings.opacity : 1,
+          rotation: 0,
+          color: props.activeTool === "highlight" ? props.highlightSettings.color : "#FDE047",
+        } as HighlightElement);
       } else if (props.activeTool === "whiteout") {
         props.onAddElementKeepTool({ id: makeId("wo"), pageId: props.pageId, type: "whiteout", x, y, width: w, height: h, opacity: 1, rotation: 0, color: "#ffffff" });
       }
@@ -976,14 +1082,13 @@ function AnnotationLayer(props: {
       {props.elements.map((el) => {
         const selected = props.selectedIds.has(el.id);
         const canRotate = selected && props.activeTool === "select" && ROTATABLE_TYPES.has(el.type) && props.selectedIds.size === 1;
-        const s = el as ShapeElement & { flipDiag?: boolean };
+        const s = el as ShapeElement & { flipDiag?: boolean; dash?: "solid" | "dashed" | "dotted" };
         const sw = el.width * props.scale, sh = el.height * props.scale;
         
         const style: CSSProperties = { 
           position: "absolute", left: el.x * props.scale, top: el.y * props.scale, width: sw, height: sh, 
           opacity: el.opacity, transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined, 
-          transformOrigin: "center center",
-          pointerEvents: props.activeTool === "select" ? "auto" : "none" 
+          transformOrigin: "center center"
         };
 
         let body: React.ReactNode = null;
@@ -991,35 +1096,35 @@ function AnnotationLayer(props: {
           const t = el as TextElement;
           body = (<div contentEditable={selected && props.activeTool === "select" && props.selectedIds.size === 1} suppressContentEditableWarning onBlur={(e2) => props.onUpdateElement(el.id, { text: e2.currentTarget.textContent || "" })} style={{ width: "100%", height: "100%", fontFamily: props.textPreviewFonts[el.id] ? fontFamilyStack(props.textPreviewFonts[el.id]) : t.font === "TimesRoman" ? "Times New Roman, serif" : t.font === "Courier" ? "monospace" : "Helvetica, Arial, sans-serif", fontSize: t.fontSize * props.scale, fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? "italic" : "normal", textDecoration: t.underline ? "underline" : "none", color: t.color, textAlign: t.align, whiteSpace: "pre-wrap", outline: "none", lineHeight: t.lineSpacing, letterSpacing: `${t.letterSpacing * props.scale}px`, cursor: "text" }}>{t.text}</div>);
         } else if (el.type === "rect") {
-          body = <div style={{ width: "100%", height: "100%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
+          body = <div style={{ width: "100%", height: "100%", border: `${s.strokeWidth * props.scale}px ${s.dash === "dashed" ? "dashed" : s.dash === "dotted" ? "dotted" : "solid"} ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if ((el.type as string) === "rounded-rect") {
-          body = <div style={{ width: "100%", height: "100%", borderRadius: 12 * props.scale, border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
+          body = <div style={{ width: "100%", height: "100%", borderRadius: 12 * props.scale, border: `${s.strokeWidth * props.scale}px ${s.dash === "dashed" ? "dashed" : s.dash === "dotted" ? "dotted" : "solid"} ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "ellipse") {
-          body = <div style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
+          body = <div style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${s.strokeWidth * props.scale}px ${s.dash === "dashed" ? "dashed" : s.dash === "dotted" ? "dotted" : "solid"} ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "line") {
           const flip = (s as any).flipDiag;
-          body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}><line x1={0} y1={flip ? sh : 0} x2={sw} y2={flip ? 0 : sh} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" /></svg>);
+          body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}><line x1={0} y1={flip ? sh : 0} x2={sw} y2={flip ? 0 : sh} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinecap="round" /></svg>);
         } else if ((el.type as string) === "arrow") {
           const aw = Math.max(10, Math.min(sw * 0.25, sh * 0.8));
           const ah = aw * 0.65;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <line x1={0} y1={sh / 2} x2={sw - aw * 0.8} y2={sh / 2} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" />
+            <line x1={0} y1={sh / 2} x2={sw - aw * 0.8} y2={sh / 2} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinecap="round" />
             <polygon points={`${sw - aw},${sh / 2 - ah / 2} ${sw},${sh / 2} ${sw - aw},${sh / 2 + ah / 2}`} fill={s.stroke} />
           </svg>);
         } else if ((el.type as string) === "triangle") {
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <polygon points={`${sw / 2},0 ${sw},${sh} 0,${sh}`} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
+            <polygon points={`${sw / 2},0 ${sw},${sh} 0,${sh}`} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinejoin="round" />
           </svg>);
         } else if ((el.type as string) === "star") {
           const cx = sw / 2, cy = sh / 2, outerR = Math.min(cx, cy) * 0.98, innerR = outerR * 0.42;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <polygon points={starSvgPoints(cx, cy, outerR, innerR)} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
+            <polygon points={starSvgPoints(cx, cy, outerR, innerR)} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinejoin="round" />
           </svg>);
         } else if ((el.type as string) === "speech") {
           const r = Math.min(10, sw * 0.05, sh * 0.08);
           const tailH = sh * 0.22, bubH = sh - tailH;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <path d={`M ${r},0 L ${sw - r},0 Q ${sw},0 ${sw},${r} L ${sw},${bubH - r} Q ${sw},${bubH} ${sw - r},${bubH} L ${sw * 0.38},${bubH} L ${sw * 0.22},${sh} L ${sw * 0.3},${bubH} L ${r},${bubH} Q 0,${bubH} 0,${bubH - r} L 0,${r} Q 0,0 ${r},0 Z`} fill={s.fill ?? "white"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
+            <path d={`M ${r},0 L ${sw - r},0 Q ${sw},0 ${sw},${r} L ${sw},${bubH - r} Q ${sw},${bubH} ${sw - r},${bubH} L ${sw * 0.38},${bubH} L ${sw * 0.22},${sh} L ${sw * 0.3},${bubH} L ${r},${bubH} Q 0,${bubH} 0,${bubH - r} L 0,${r} Q 0,0 ${r},0 Z`} fill={s.fill ?? "white"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinejoin="round" />
           </svg>);
         } else if (el.type === "draw") {
           const d = el as DrawElement;
@@ -1067,7 +1172,8 @@ function AnnotationLayer(props: {
         }
 
         return (
-          <div key={el.id} style={style} onPointerDown={props.activeTool === "select" ? (e) => startMove(e, el) : undefined}
+          <div key={el.id} style={{ ...style, pointerEvents: props.activeTool === "select" ? "auto" : "none" }}
+            onPointerDown={props.activeTool === "select" ? (e) => startMove(e, el) : undefined}
             className={cn(selected && props.activeTool === "select" && "outline outline-2 outline-[#DC2626] outline-offset-1")}>
             {body}
             {selected && props.activeTool === "select" && props.selectedIds.size === 1 && el.type !== "draw" && el.type !== "sticky" && !el.type.startsWith("field-") && (
@@ -1189,6 +1295,15 @@ function ContextPropertiesPanel({ selectedElements, singleSelected, activeTool, 
                 </div>
               </PropRow>
             )}
+            {isShape && (
+              <PropRow label="Dash style">
+                <select value={(el as ShapeElement & { dash?: "solid" | "dashed" | "dotted" }).dash || "solid"} onChange={(e) => onUpdateElement(el.id, { dash: e.target.value } as any)} className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs focus:outline-none focus:border-[#DC2626]">
+                  <option value="solid">Solid</option>
+                  <option value="dashed">Dashed</option>
+                  <option value="dotted">Dotted</option>
+                </select>
+              </PropRow>
+            )}
           </div>
         )}
 
@@ -1245,7 +1360,7 @@ function PropRow({ label, children }: { label: string; children: React.ReactNode
   return <div><div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{label}</div>{children}</div>;
 }
 
-/* =========================================================  SIGNATURE MODAL — fixed, self-contained, smooth drawing  ========================================================= */
+/* =========================================================  SIGNATURE MODAL  ========================================================= */
 function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: {
   onInsert: (src: string, save: boolean) => void; onCancel: () => void;
   savedSignatures: SavedSignature[]; onDeleteSaved: (id: string) => void;
@@ -1261,7 +1376,6 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
   const isDrawing = useRef(false);
   const lastPos = useRef<{ x: number; y: number } | null>(null);
 
-  // Load Google Fonts for signatures
   useEffect(() => {
     SIG_FONTS.forEach(({ family }) => {
       const link = document.createElement("link");
@@ -1287,7 +1401,6 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
     const ctx = canvas.getContext("2d"); if (!ctx) return;
     ctx.strokeStyle = sigColor; ctx.fillStyle = sigColor;
     ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    // Draw initial dot so single taps are visible
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, 1.5, 0, Math.PI * 2);
     ctx.fill();
@@ -1300,7 +1413,6 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
     const pos = getPointerPos(e);
-    // Smooth with midpoint quadratic bezier — eliminates jagged lines
     const midX = (lastPos.current.x + pos.x) / 2;
     const midY = (lastPos.current.y + pos.y) / 2;
     ctx.strokeStyle = sigColor;
