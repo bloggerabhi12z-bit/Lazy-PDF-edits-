@@ -6,54 +6,18 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  ArrowLeft,
-  ArrowLeftRight,
-  ArrowRight,
-  ArrowDown,
-  ArrowUp,
-  Bold,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  Download,
-  Eraser,
-  FileCheck2,
-  FilePlus,
-  Hand,
-  Highlighter,
-  Image as ImageIcon,
-  Italic,
-  Loader2,
-  Lock,
-  Maximize2,
-  MessageSquare,
-  MoreHorizontal,
-  MousePointer2,
-  PenLine,
-  PenTool,
-  Plus,
-  Redo2,
-  RotateCw,
-  Search,
-  Square,
-  Trash2,
-  Type,
-  Underline as UnderlineIcon,
-  Undo2,
-  X,
-  ChevronDown,
-  Minus,
+  AlignLeft, AlignCenter, AlignRight, ArrowLeft, ArrowLeftRight, ArrowRight,
+  Bold, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser,
+  FileCheck2, FilePlus, Hand, Highlighter, Image as ImageIcon, Italic,
+  Loader2, Lock, Maximize2, MessageSquare, MoreHorizontal, MousePointer2,
+  PenLine, PenTool, Plus, Redo2, RotateCw, Search, Square, Star,
+  Trash2, Triangle, Type, Underline as UnderlineIcon, Undo2, X, ChevronDown, Minus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/download";
@@ -61,178 +25,128 @@ import { publishResult } from "@/lib/result-store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
-  FONT_OPTIONS,
-  ROTATABLE_TYPES,
-  deleteSavedSignature,
-  getSavedSignatures,
-  makeId,
-  saveSignature,
-  stampElements,
-  type AnyElement,
-  type DrawElement,
-  type FieldCheckboxElement,
-  type FieldDropdownElement,
-  type FieldRadioElement,
-  type FieldTextElement,
-  type HighlightElement,
-  type ImageElement,
-  type SavedSignature,
-  type ShapeElement,
-  type StickyElement,
-  type TextElement,
+  FONT_OPTIONS, ROTATABLE_TYPES, deleteSavedSignature, getSavedSignatures, makeId, saveSignature, stampElements,
+  type AnyElement, type DrawElement, type FieldCheckboxElement, type FieldDropdownElement,
+  type FieldRadioElement, type FieldTextElement, type HighlightElement, type ImageElement,
+  type SavedSignature, type ShapeElement, type StickyElement, type TextElement,
 } from "@/lib/pdf-annotations";
 
-export type EditorPage = {
-  id: string;
-  originalIndex: number;
-  rotation: number;
-  selected: boolean;
-  isBlank?: boolean;
-};
-
-export type EditorApplyState = {
-  pages: EditorPage[];
-  selectedIds: Set<string>;
-};
-
+export type EditorPage = { id: string; originalIndex: number; rotation: number; selected: boolean; isBlank?: boolean };
+export type EditorApplyState = { pages: EditorPage[]; selectedIds: Set<string> };
 export type EditorApplyResult = { blob: Blob; filename: string } | void | undefined;
 
 type PdfPage = {
   getViewport: (o: { scale: number; rotation?: number }) => { width: number; height: number };
-  render: (o: {
-    canvas: HTMLCanvasElement;
-    canvasContext: CanvasRenderingContext2D;
-    viewport: { width: number; height: number };
-  }) => { promise: Promise<void> };
+  render: (o: { canvas: HTMLCanvasElement; canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> };
   getTextContent?: () => Promise<{ items: { str: string }[] }>;
 };
-
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
-
-type Mode = "select" | "rotate" | "reorder";
 type Phase = "reading" | "rendering" | "ready" | "error";
-
 type Tool =
-  | "select"
-  | "hand"
-  | "text"
-  | "draw"
-  | "eraser"
-  | "shape-rect"
-  | "shape-ellipse"
-  | "shape-line"
-  | "emoji"
-  | "highlight"
-  | "underline"
-  | "strikeout"
-  | "squiggly"
-  | "image"
-  | "signature"
-  | "whiteout"
-  | "sticky"
-  | "field-text"
-  | "field-checkbox"
-  | "field-radio"
-  | "field-dropdown";
+  | "select" | "hand" | "text" | "draw" | "eraser"
+  | "shape-rect" | "shape-ellipse" | "shape-line" | "shape-arrow"
+  | "shape-triangle" | "shape-star" | "shape-rounded-rect" | "shape-speech"
+  | "highlight" | "underline" | "strikeout" | "squiggly"
+  | "image" | "signature" | "whiteout" | "sticky"
+  | "field-text" | "field-checkbox" | "field-radio" | "field-dropdown";
 
-interface PdfEditorProps {
-  file: File;
-  mode: Mode;
-  actionLabel: string;
-  busy?: boolean;
-  selectionHint?: string;
-  onReplace: () => void;
-  onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
-}
-
-const MAX_HISTORY = 100;
-const NUDGE = 1;
-const NUDGE_FAST = 10;
+const MAX_HISTORY = 50;
+const NUDGE = 1, NUDGE_FAST = 10;
 
 const SYSTEM_FONT_FAMILIES = [
-  "Helvetica", "Arial", "Times New Roman", "Georgia", "Courier New", "Verdana", 
-  "Tahoma", "Trebuchet MS", "Palatino", "Garamond", "Book Antiqua", "Century Gothic", 
-  "Franklin Gothic Medium", "Lucida Console", "Lucida Sans Unicode", "Segoe UI", 
-  "Calibri", "Cambria", "Consolas", "Impact", "Comic Sans MS", "Rockwell", 
-  "Baskerville", "Optima", "Didot", "Futura",
+  "Helvetica","Arial","Times New Roman","Georgia","Courier New","Verdana","Tahoma",
+  "Trebuchet MS","Palatino","Garamond","Book Antiqua","Century Gothic","Franklin Gothic Medium",
+  "Lucida Console","Lucida Sans Unicode","Segoe UI","Calibri","Cambria","Consolas","Impact",
+  "Comic Sans MS","Rockwell","Baskerville","Optima","Didot","Futura",
 ];
 const GOOGLE_FONT_FAMILIES = [
-  "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Inter", "Merriweather", 
-  "Playfair Display", "Nunito", "Raleway", "Ubuntu", "PT Serif", "Source Sans Pro", 
-  "Oswald", "Noto Sans", "Work Sans", "Fira Sans", "Rubik", "Karla", "Quicksand", 
-  "Josefin Sans", "Crimson Text", "Libre Baskerville", "EB Garamond", "Cormorant Garamond", 
-  "DM Sans", "Space Grotesk", "Bitter", "Zilla Slab", "IBM Plex Sans", "IBM Plex Serif", 
-  "IBM Plex Mono", "Roboto Mono", "JetBrains Mono", "Caveat", "Pacifico", "Dancing Script", 
-  "Great Vibes", "Shadows Into Light", "Indie Flower",
+  "Roboto","Open Sans","Lato","Montserrat","Poppins","Inter","Merriweather","Playfair Display",
+  "Nunito","Raleway","Ubuntu","PT Serif","Source Sans Pro","Oswald","Noto Sans","Work Sans",
+  "Fira Sans","Rubik","Karla","Quicksand","Josefin Sans","Crimson Text","Libre Baskerville",
+  "EB Garamond","Cormorant Garamond","DM Sans","Space Grotesk","Bitter","Zilla Slab",
+  "IBM Plex Sans","IBM Plex Serif","IBM Plex Mono","Roboto Mono","JetBrains Mono",
+  "Caveat","Pacifico","Dancing Script","Great Vibes","Shadows Into Light","Indie Flower",
 ];
 const FONT_PREVIEW_CHOICES = [...SYSTEM_FONT_FAMILIES, ...GOOGLE_FONT_FAMILIES];
 
-const PALETTE = ["#111827", "#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#ec4899", "#ffffff"];
-const HIGHLIGHT_PALETTE = ["#fde047", "#86efac", "#93c5fd", "#fca5a5", "#f0abfc"];
-
-const EMOJI_LIST = [
-  "🙂", "😂", "😎", "😍", "🤔", "😬", "🙏", "👍", "👎", "👏", "🙌", 
-  "❗", "❓", "✅", "❌", "🔥", "✨", "💯", "🎉", "⭐", "💡", "📌", "⚠️", "🛑"
+const SIG_FONTS = [
+  { family: "Dancing Script", label: "Elegant" },
+  { family: "Great Vibes", label: "Formal" },
+  { family: "Pacifico", label: "Bold" },
+  { family: "Caveat", label: "Casual" },
+  { family: "Shadows Into Light", label: "Written" },
+  { family: "Indie Flower", label: "Fun" },
 ];
 
 function fontFamilyStack(name: string): string {
-  const serif = ["Times New Roman", "Georgia", "Palatino", "Garamond", "Book Antiqua", "Cambria", "Baskerville", "Didot", "PT Serif", "Merriweather", "Playfair Display", "Crimson Text", "Libre Baskerville", "EB Garamond", "Cormorant Garamond", "Bitter", "Zilla Slab", "IBM Plex Serif"];
-  const mono = ["Courier New", "Lucida Console", "Consolas", "Roboto Mono", "JetBrains Mono", "IBM Plex Mono"];
-  const script = ["Caveat", "Pacifico", "Dancing Script", "Great Vibes", "Shadows Into Light", "Indie Flower"];
+  const serif = ["Times New Roman","Georgia","Palatino","Garamond","Book Antiqua","Cambria","Baskerville","Didot","PT Serif","Merriweather","Playfair Display","Crimson Text","Libre Baskerville","EB Garamond","Cormorant Garamond","Bitter","Zilla Slab","IBM Plex Serif"];
+  const mono = ["Courier New","Lucida Console","Consolas","Roboto Mono","JetBrains Mono","IBM Plex Mono"];
+  const script = ["Caveat","Pacifico","Dancing Script","Great Vibes","Shadows Into Light","Indie Flower"];
   const fallback = serif.includes(name) ? "serif" : mono.includes(name) ? "monospace" : script.includes(name) ? "cursive" : "sans-serif";
   return `"${name}", ${fallback}`;
 }
 
 type HistorySnapshot = { pages: EditorPage[]; elements: AnyElement[] };
-function snapshotsEqual(a: HistorySnapshot, b: HistorySnapshot) {
-  return JSON.stringify(a) === JSON.stringify(b);
+function snapshotsEqual(a: HistorySnapshot, b: HistorySnapshot) { return JSON.stringify(a) === JSON.stringify(b); }
+
+// Partial stroke erasure: splits DrawElement point arrays at erased positions
+function eraseFromDrawElements(
+  eraserPt: { x: number; y: number }, radius: number, drawEls: DrawElement[]
+): { toRemove: string[]; toAdd: DrawElement[] } {
+  const toRemove: string[] = [], toAdd: DrawElement[] = [];
+  for (const el of drawEls) {
+    const margin = radius + 1;
+    if (eraserPt.x < el.x - margin || eraserPt.x > el.x + el.width + margin ||
+        eraserPt.y < el.y - margin || eraserPt.y > el.y + el.height + margin) continue;
+    const hasHit = el.points.some((p) => Math.hypot(p.x + el.x - eraserPt.x, p.y + el.y - eraserPt.y) <= radius);
+    if (!hasHit) continue;
+    toRemove.push(el.id);
+    const segments: { x: number; y: number }[][] = [];
+    let current: { x: number; y: number }[] = [];
+    for (const p of el.points) {
+      if (Math.hypot(p.x + el.x - eraserPt.x, p.y + el.y - eraserPt.y) <= radius) {
+        if (current.length >= 2) segments.push([...current]);
+        current = [];
+      } else current.push(p);
+    }
+    if (current.length >= 2) segments.push(current);
+    for (const seg of segments) {
+      const absXs = seg.map((p) => p.x + el.x), absYs = seg.map((p) => p.y + el.y);
+      const minX = Math.min(...absXs), minY = Math.min(...absYs);
+      const maxX = Math.max(...absXs), maxY = Math.max(...absYs);
+      toAdd.push({ ...el, id: makeId("draw"), x: minX, y: minY,
+        width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY),
+        points: seg.map((p) => ({ x: p.x + el.x - minX, y: p.y + el.y - minY })) });
+    }
+  }
+  return { toRemove, toAdd };
 }
 
-function defaultRotation() {
-  return 0;
+function starSvgPoints(cx: number, cy: number, outerR: number, innerR: number): string {
+  return Array.from({ length: 10 }, (_, i) => {
+    const angle = (i * Math.PI) / 5 - Math.PI / 2;
+    const r = i % 2 === 0 ? outerR : innerR;
+    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
+  }).join(" ");
 }
 
-export function PdfEditor({
-  file,
-  mode,
-  actionLabel,
-  busy = false,
-  onReplace,
-  onApply,
-}: PdfEditorProps) {
+export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, onApply }: {
+  file: File; mode: string; actionLabel: string; busy?: boolean; selectionHint?: string;
+  onReplace: () => void; onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
+}) {
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
   const [pages, setPages] = useState<EditorPage[]>([]);
-  const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const [elements, setElements] = useState<AnyElement[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeTool, setActiveTool] = useState<Tool>("select");
-
-  const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
-  const [isMobile, setIsMobile] = useState(false);
-
-  const [brushColor, setBrushColor] = useState(PALETTE[1]);
-  const [highlightColor, setHighlightColor] = useState(HIGHLIGHT_PALETTE[0]);
-  const [brushSize, setBrushSize] = useState(3);
-  
-  const [showShapesMenu, setShowShapesMenu] = useState(false);
-  const [selectedEmoji, setSelectedEmoji] = useState(EMOJI_LIST[0]);
-
-  useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 1024);
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setShowLeftSidebar(false);
-    }
-  }, []);
-
+  const [activeShape, setActiveShape] = useState<Tool>("shape-rect");
+  const [showShapePicker, setShowShapePicker] = useState(false);
+  const [drawStroke, setDrawStroke] = useState<{ color: string; width: number }>({ color: "#DC2626", width: 2 });
+  const [eraserSize, setEraserSize] = useState(15);
+  const [showLeftSidebar, setShowLeftSidebar] = useState(true);
+  const [showRightSidebar, setShowRightSidebar] = useState(true);
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
   const loadedGoogleFontsRef = useRef<Set<string>>(new Set());
-
   const setPreviewFont = useCallback((id: string, family: string) => {
     setTextPreviewFonts((m) => ({ ...m, [id]: family }));
     if (GOOGLE_FONT_FAMILIES.includes(family) && !loadedGoogleFontsRef.current.has(family)) {
@@ -244,144 +158,70 @@ export function PdfEditor({
     }
   }, []);
   const [showMoreTools, setShowMoreTools] = useState(false);
-  const [moreToolsPos, setMoreToolsPos] = useState<{ top: number; left: number } | null>(null);
   const moreBtnRef = useRef<HTMLDivElement | null>(null);
-  const shapesBtnRef = useRef<HTMLDivElement | null>(null);
+  const shapeBtnRef = useRef<HTMLDivElement | null>(null);
+  const [moreToolsPos, setMoreToolsPos] = useState<{ top: number; left: number } | null>(null);
+  const [shapePickerPos, setShapePickerPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
-    function onDocPointerDown(ev: PointerEvent) {
-      const target = ev.target as Node;
-      if (showMoreTools && moreBtnRef.current && !moreBtnRef.current.contains(target)) {
-        setShowMoreTools(false);
-      }
-      if (showShapesMenu && shapesBtnRef.current && !shapesBtnRef.current.contains(target)) {
-        setShowShapesMenu(false);
-      }
-    }
-    function onDocKey(ev: KeyboardEvent) {
-      if (ev.key === "Escape") {
-        setShowMoreTools(false);
-        setShowShapesMenu(false);
-      }
-    }
-    document.addEventListener("pointerdown", onDocPointerDown);
-    document.addEventListener("keydown", onDocKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDocPointerDown);
-      document.removeEventListener("keydown", onDocKey);
-    };
-  }, [showMoreTools, showShapesMenu]);
+    if (!showMoreTools) return;
+    const onDown = (ev: MouseEvent) => { if (moreBtnRef.current && !moreBtnRef.current.contains(ev.target as Node)) setShowMoreTools(false); };
+    document.addEventListener("mousedown", onDown); return () => document.removeEventListener("mousedown", onDown);
+  }, [showMoreTools]);
+  useEffect(() => {
+    if (!showShapePicker) return;
+    const onDown = (ev: MouseEvent) => { if (shapeBtnRef.current && !shapeBtnRef.current.contains(ev.target as Node)) setShowShapePicker(false); };
+    document.addEventListener("mousedown", onDown); return () => document.removeEventListener("mousedown", onDown);
+  }, [showShapePicker]);
 
   const [phase, setPhase] = useState<Phase>("reading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [current, setCurrent] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [fitMode, setFitMode] = useState<"width" | "page" | "custom">("width");
-
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
-  const [, setFirstPageDims] = useState<{ w: number; h: number } | null>(null);
-
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ pageIndex: number; snippet: string }[]>([]);
   const [searchActiveIdx, setSearchActiveIdx] = useState(0);
   const [searching, setSearching] = useState(false);
   const textCacheRef = useRef<Record<number, string>>({});
-
-  const searchMatchPages = useMemo(
-    () => new Set(searchResults.map((r) => r.pageIndex)),
-    [searchResults]
-  );
-
   const [signatureOpen, setSignatureOpen] = useState(false);
-  const [signatureTab, setSignatureTab] = useState<"draw" | "type" | "saved">("draw");
-  const [typedSignature, setTypedSignature] = useState("");
-  const [saveSigAfterInsert, setSaveSigAfterInsert] = useState(true);
   const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
-  const sigCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sigDrawingRef = useRef(false);
-
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const historyRef = useRef<HistorySnapshot[]>([]);
   const historyIndexRef = useRef<number>(-1);
   const [, setHistoryTick] = useState(0);
   const skipHistoryRef = useRef(false);
-
   const [processing, setProcessing] = useState(false);
-  const [success, setSuccess] = useState<null | {
-    blob: Blob;
-    filename: string;
-    thumb: string | null;
-    pages: number;
-  }>(null);
-
+  const [success, setSuccess] = useState<null | { blob: Blob; filename: string; thumb: string | null; pages: number }>(null);
   const lastSelectedRef = useRef<number | null>(null);
-  const panStateRef = useRef<{
-    startX: number;
-    startY: number;
-    scrollLeft: number;
-    scrollTop: number;
-    el: HTMLElement;
-  } | null>(null);
+  const panStateRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; el: HTMLElement } | null>(null);
 
-  useEffect(() => {
-    setSavedSignatures(getSavedSignatures());
-  }, [signatureOpen]);
+  useEffect(() => { setSavedSignatures(getSavedSignatures()); }, [signatureOpen]);
 
   useEffect(() => {
     let cancelled = false;
-    setPhase("reading");
-    setErrorMsg(null);
-    setPdf(null);
-    setPages([]);
-    setElements([]);
-    setSelectedIds(new Set());
-    setThumbs({});
-    setCurrent(0);
-    setSuccess(null);
-    historyRef.current = [];
-    historyIndexRef.current = 0;
-    textCacheRef.current = {};
-
+    setPhase("reading"); setErrorMsg(null); setPdf(null); setPages([]); setElements([]);
+    setSelectedIds(new Set()); setThumbs({}); setCurrent(0); setSuccess(null);
+    historyRef.current = []; historyIndexRef.current = -1; textCacheRef.current = {};
     (async () => {
       try {
         const { loadPdf } = await import("@/lib/pdf-render");
         const doc = (await loadPdf(file)) as unknown as PdfDoc;
         if (cancelled) return;
-        const initial: EditorPage[] = Array.from({ length: doc.numPages }, (_, i) => ({
-          id: `p${i}`,
-          originalIndex: i,
-          rotation: 0,
-          selected: false,
-        }));
-        setPdf(doc);
-        setPages(initial);
-        historyRef.current = [{ pages: initial, elements: [] }];
-        historyIndexRef.current = 0;
+        const initial: EditorPage[] = Array.from({ length: doc.numPages }, (_, i) => ({ id: `p${i}`, originalIndex: i, rotation: 0, selected: false }));
+        setPdf(doc); setPages(initial);
+        historyRef.current = [{ pages: initial, elements: [] }]; historyIndexRef.current = 0;
         setPhase("rendering");
-
-        try {
-          const p = await doc.getPage(1);
-          const vp = p.getViewport({ scale: 1 });
-          if (!cancelled) setFirstPageDims({ w: Math.round(vp.width), h: Math.round(vp.height) });
-        } catch {
-          /* ignore */
-        }
       } catch (e) {
         if (cancelled) return;
-        const message = e instanceof Error ? e.message : "Could not read PDF.";
-        const friendly = /password/i.test(message)
-          ? "This PDF is password-protected. Unlock it first."
-          : /invalid|corrupt|malformed/i.test(message)
-          ? "This file looks corrupt or is not a valid PDF."
-          : message;
-        setErrorMsg(friendly);
+        const msg = e instanceof Error ? e.message : "Could not read PDF.";
+        setErrorMsg(/password/i.test(msg) ? "This PDF is password-protected." : /invalid|corrupt/i.test(msg) ? "This file appears corrupt." : msg);
         setPhase("error");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [file]);
 
   useEffect(() => {
@@ -393,32 +233,22 @@ export function PdfEditor({
         if (thumbs[i]) continue;
         try {
           const page = await pdf.getPage(i + 1);
-          const viewport = page.getViewport({ scale: 0.3 });
+          const vp = page.getViewport({ scale: 0.3 });
           const canvas = document.createElement("canvas");
-          canvas.width = Math.ceil(viewport.width);
-          canvas.height = Math.ceil(viewport.height);
-          const ctx = canvas.getContext("2d");
-          if (!ctx) continue;
-          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-          const url = canvas.toDataURL("image/jpeg", 0.75);
-          if (!cancelled) setThumbs((t) => ({ ...t, [i]: url }));
-        } catch {
-          /* skip */
-        }
+          canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+          const ctx = canvas.getContext("2d"); if (!ctx) continue;
+          await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
+          if (!cancelled) setThumbs((t) => ({ ...t, [i]: canvas.toDataURL("image/jpeg", 0.75) }));
+        } catch { /**/ }
       }
       if (!cancelled) setPhase("ready");
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [pdf]);
 
   useEffect(() => {
     if (pages.length === 0) return;
-    if (skipHistoryRef.current) {
-      skipHistoryRef.current = false;
-      return;
-    }
+    if (skipHistoryRef.current) { skipHistoryRef.current = false; return; }
     const idx = historyIndexRef.current;
     const last = historyRef.current[idx];
     const next: HistorySnapshot = { pages, elements };
@@ -426,225 +256,50 @@ export function PdfEditor({
     const trimmed = historyRef.current.slice(0, idx + 1);
     trimmed.push(next);
     while (trimmed.length > MAX_HISTORY) trimmed.shift();
-    historyRef.current = trimmed;
-    historyIndexRef.current = trimmed.length - 1;
+    historyRef.current = trimmed; historyIndexRef.current = trimmed.length - 1;
     setHistoryTick((n) => n + 1);
   }, [pages, elements]);
 
   const canUndo = historyIndexRef.current > 0;
   const canRedo = historyIndexRef.current < historyRef.current.length - 1;
+  const applySnapshot = useCallback((snap: HistorySnapshot) => { skipHistoryRef.current = true; setPages(snap.pages); setElements(snap.elements); }, []);
+  const undo = useCallback(() => { const idx = historyIndexRef.current; if (idx <= 0) return; historyIndexRef.current = idx - 1; applySnapshot(historyRef.current[idx - 1]); setSelectedIds(new Set()); setHistoryTick((n) => n + 1); }, [applySnapshot]);
+  const redo = useCallback(() => { const idx = historyIndexRef.current; if (idx >= historyRef.current.length - 1) return; historyIndexRef.current = idx + 1; applySnapshot(historyRef.current[idx + 1]); setSelectedIds(new Set()); setHistoryTick((n) => n + 1); }, [applySnapshot]);
 
-  const applySnapshot = useCallback((snap: HistorySnapshot) => {
-    skipHistoryRef.current = true;
-    setPages(snap.pages);
-    setElements(snap.elements);
+  const selectAllPages = useCallback(() => setPages((ps) => ps.map((p) => ({ ...p, selected: true }))), []);
+  const handlePageClick = useCallback((i: number, e: ReactMouseEvent) => {
+    setCurrent(i); document.getElementById(`pdf-page-${i}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    lastSelectedRef.current = i;
   }, []);
+  const rotatePage = useCallback((i: number, delta: number) => setPages((ps) => ps.map((p, idx) => (idx === i ? { ...p, rotation: (p.rotation + delta + 360) % 360 } : p))), []);
+  const deletePage = useCallback((i: number) => setPages((ps) => { if (ps.length <= 1) { toast.error("PDF must have at least one page."); return ps; } return ps.filter((_, idx) => idx !== i); }), []);
+  const duplicatePage = useCallback((i: number) => setPages((ps) => { const out = [...ps]; out.splice(i + 1, 0, { ...ps[i], id: `${ps[i].id}-dup-${Date.now()}`, selected: false }); return out; }), []);
+  const insertBlankPage = useCallback((after: number) => setPages((ps) => { const out = [...ps]; out.splice(after + 1, 0, { id: `blank-${Date.now()}`, originalIndex: -1, isBlank: true, rotation: 0, selected: false }); return out; }), []);
 
-  const undo = useCallback(() => {
-    const idx = historyIndexRef.current;
-    if (idx <= 0) return;
-    historyIndexRef.current = idx - 1;
-    applySnapshot(historyRef.current[idx - 1]);
-    setSelectedIds(new Set());
-    setHistoryTick((n) => n + 1);
-  }, [applySnapshot]);
-
-  const redo = useCallback(() => {
-    const idx = historyIndexRef.current;
-    if (idx >= historyRef.current.length - 1) return;
-    historyIndexRef.current = idx + 1;
-    applySnapshot(historyRef.current[idx + 1]);
-    setSelectedIds(new Set());
-    setHistoryTick((n) => n + 1);
-  }, [applySnapshot]);
-
-  const selectAllPages = useCallback(
-    () => setPages((ps) => ps.map((p) => ({ ...p, selected: true }))),
-    []
-  );
-
-  const selectRange = useCallback((from: number, to: number) => {
-    const [a, b] = from < to ? [from, to] : [to, from];
-    setPages((ps) => ps.map((p, i) => ({ ...p, selected: p.selected || (i >= a && i <= b) })));
+  const addElement = useCallback((el: AnyElement) => { setElements((es) => [...es, el]); setSelectedIds(new Set([el.id])); setActiveTool("select"); }, []);
+  const addElementKeepTool = useCallback((el: AnyElement) => { setElements((es) => [...es, el]); setSelectedIds(new Set([el.id])); }, []);
+  const updateElement = useCallback((id: string, patch: Partial<AnyElement>) => setElements((es) => es.map((e) => (e.id === id ? ({ ...e, ...patch } as AnyElement) : e))), []);
+  const updateElements = useCallback((ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => setElements((es) => es.map((e) => (ids.has(e.id) ? ({ ...e, ...patchFn(e) } as AnyElement) : e))), []);
+  const deleteElements = useCallback((ids: Set<string>) => { setElements((es) => es.filter((e) => !ids.has(e.id))); setSelectedIds(new Set()); }, []);
+  const duplicateElements = useCallback((ids: Set<string>) => {
+    setElements((es) => { const toDup = es.filter((e) => ids.has(e.id)); const clones = toDup.map((e) => ({ ...e, id: makeId("dup"), x: e.x + 14, y: e.y + 14 } as AnyElement)); setSelectedIds(new Set(clones.map((c) => c.id))); return [...es, ...clones]; });
   }, []);
-
-  const handlePageClick = useCallback(
-    (i: number, e: ReactMouseEvent) => {
-      setCurrent(i);
-      const el = document.getElementById(`pdf-page-${i}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-
-      if (mode !== "select") {
-        lastSelectedRef.current = i;
-        return;
-      }
-      if (e.shiftKey && lastSelectedRef.current != null) {
-        selectRange(lastSelectedRef.current, i);
-      } else if (e.metaKey || e.ctrlKey) {
-        setPages((ps) => ps.map((p, idx) => (idx === i ? { ...p, selected: !p.selected } : p)));
-      } else {
-        setPages((ps) => ps.map((p, idx) => ({ ...p, selected: idx === i ? !p.selected : p.selected })));
-      }
-      lastSelectedRef.current = i;
-    },
-    [mode, selectRange]
-  );
-
-  const rotatePage = useCallback((i: number, delta: number) => {
-    setPages((ps) =>
-      ps.map((p, idx) => (idx === i ? { ...p, rotation: (p.rotation + delta + 360) % 360 } : p))
-    );
-  }, []);
-
-  const deletePage = useCallback((i: number) => {
-    setPages((ps) => {
-      if (ps.length <= 1) {
-        toast.error("Your PDF must contain at least one page.");
-        return ps;
-      }
-      return ps.filter((_, idx) => idx !== i);
-    });
-  }, []);
-
-  const movePage = useCallback((from: number, to: number) => {
-    if (from === to || from < 0 || to < 0) return;
-    setPages((ps) => {
-      if (from >= ps.length || to >= ps.length) return ps;
-      const next = [...ps];
-      const [page] = next.splice(from, 1);
-      next.splice(to, 0, page);
+  const replaceElements = useCallback((toRemove: string[], toAdd: AnyElement[]) => setElements((es) => [...es.filter((e) => !toRemove.includes(e.id)), ...toAdd]), []);
+  const reorderZ = useCallback((ids: Set<string>, dir: "forward" | "backward" | "front" | "back") => {
+    setElements((es) => {
+      const next = [...es];
+      const indices = next.map((e, i) => (ids.has(e.id) ? i : -1)).filter((i) => i >= 0);
+      if (!indices.length) return es;
+      if (dir === "front") { const items = indices.map((i) => next[i]); return [...next.filter((_, i) => !indices.includes(i)), ...items]; }
+      if (dir === "back") { const items = indices.map((i) => next[i]); return [...items, ...next.filter((_, i) => !indices.includes(i))]; }
+      const step = dir === "forward" ? 1 : -1;
+      const order = dir === "forward" ? [...indices].reverse() : indices;
+      for (const i of order) { const j = i + step; if (j < 0 || j >= next.length || ids.has(next[j].id)) continue; [next[i], next[j]] = [next[j], next[i]]; }
       return next;
     });
-    setCurrent((active) => {
-      if (active === from) return to;
-      if (from < active && active <= to) return active - 1;
-      if (to <= active && active < from) return active + 1;
-      return active;
-    });
   }, []);
 
-  const handlePageDrop = useCallback((targetIndex: number, event: ReactDragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const sourceId = event.dataTransfer.getData("text/plain") || draggedPageId;
-    setDraggedPageId(null);
-    if (!sourceId) return;
-    const sourceIndex = pages.findIndex((page) => page.id === sourceId);
-    if (sourceIndex >= 0) movePage(sourceIndex, targetIndex);
-  }, [draggedPageId, movePage, pages]);
-
-  const clearPage = useCallback((pageId: string) => {
-    setElements((es) => es.filter((e) => e.pageId !== pageId));
-  }, []);
-
-  const deleteSelectedPages = useCallback(() => {
-    setPages((ps) => {
-      const anySelected = ps.some((p) => p.selected);
-      if (!anySelected) return ps; 
-      
-      const remaining = ps.filter((p) => !p.selected);
-      if (remaining.length === 0) {
-        toast.error("Your PDF must contain at least one page.");
-        return ps;
-      }
-      return remaining;
-    });
-    setSelectedIds(new Set());
-  }, []);
-
-  const duplicatePage = useCallback((i: number) => {
-    setPages((ps) => {
-      const out = [...ps];
-      out.splice(i + 1, 0, { ...ps[i], id: `${ps[i].id}-dup-${Date.now()}`, selected: false });
-      return out;
-    });
-  }, []);
-
-  const insertBlankPageAfter = useCallback((index: number) => {
-    setPages((ps) => {
-      const out = [...ps];
-      out.splice(index + 1, 0, {
-        id: `blank-${Date.now()}`,
-        originalIndex: -1,
-        isBlank: true,
-        rotation: 0,
-        selected: false,
-      });
-      return out;
-    });
-  }, []);
-
-  const extractPages = async (indices: number[]) => {
-    if (processing || busy) return;
-    setProcessing(true);
-    try {
-      const extractedPages = indices.map((i) => pages[i]);
-      const result = await onApply({ pages: extractedPages, selectedIds: new Set() });
-      if (result && result.blob) {
-        let finalBlob = result.blob;
-        try {
-          const extractedPageIds = new Set(extractedPages.map((p) => p.id));
-          const relevantElements = elements.filter((e) => extractedPageIds.has(e.pageId));
-          finalBlob = await stampElements(result.blob, extractedPages, relevantElements);
-        } catch (e) {
-          console.error("Stamping failed during extraction", e);
-        }
-        const a = document.createElement("a");
-        const downloadUrl = URL.createObjectURL(finalBlob);
-        a.href = downloadUrl;
-        a.download = `Extracted_${file.name}`;
-        a.click();
-        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
-        toast.success("Pages extracted successfully!");
-      }
-    } catch {
-      toast.error("Failed to extract pages.");
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const addElement = useCallback((el: AnyElement) => {
-    setElements((es) => [...es, el]);
-    setSelectedIds(new Set([el.id]));
-    setActiveTool("select");
-  }, []);
-
-  const addElementKeepTool = useCallback((el: AnyElement) => {
-    setElements((es) => [...es, el]);
-    setSelectedIds(new Set([el.id]));
-  }, []);
-
-  const updateElement = useCallback((id: string, patch: Partial<AnyElement>) => {
-    setElements((es) => es.map((e) => (e.id === id ? ({ ...e, ...patch } as AnyElement) : e)));
-  }, []);
-
-  const updateElements = useCallback(
-    (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => {
-      setElements((es) => es.map((e) => (ids.has(e.id) ? ({ ...e, ...patchFn(e) } as AnyElement) : e)));
-    },
-    []
-  );
-
-  const deleteElements = useCallback((ids: Set<string>) => {
-    setElements((es) => es.filter((e) => !ids.has(e.id)));
-    setSelectedIds(new Set());
-  }, []);
-
-  const duplicateElements = useCallback((ids: Set<string>) => {
-    setElements((es) => {
-      const toDup = es.filter((e) => ids.has(e.id));
-      const clones = toDup.map(
-        (e) => ({ ...e, id: makeId("dup"), x: e.x + 14, y: e.y + 14 } as AnyElement)
-      );
-      setSelectedIds(new Set(clones.map((c) => c.id)));
-      return [...es, ...clones];
-    });
-  }, []);
-
-  const selectedElements = useMemo(
-    () => elements.filter((e) => selectedIds.has(e.id)),
-    [elements, selectedIds]
-  );
+  const selectedElements = useMemo(() => elements.filter((e) => selectedIds.has(e.id)), [elements, selectedIds]);
   const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null;
 
   useEffect(() => {
@@ -652,315 +307,95 @@ export function PdfEditor({
       const t = ev.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       const mod = ev.metaKey || ev.ctrlKey;
-
-      if (mod && ev.key.toLowerCase() === "z" && !ev.shiftKey) {
+      if (mod && ev.key.toLowerCase() === "z" && !ev.shiftKey) { ev.preventDefault(); undo(); }
+      else if ((mod && ev.key.toLowerCase() === "y") || (mod && ev.shiftKey && ev.key.toLowerCase() === "z")) { ev.preventDefault(); redo(); }
+      else if (mod && ev.key.toLowerCase() === "d") { ev.preventDefault(); if (selectedIds.size > 0) duplicateElements(selectedIds); }
+      else if (mod && ev.key.toLowerCase() === "a") {
         ev.preventDefault();
-        undo();
-      } else if (
-        (mod && ev.key.toLowerCase() === "y") ||
-        (mod && ev.shiftKey && ev.key.toLowerCase() === "z")
-      ) {
+        if (elements.length > 0 && activeTool === "select") { const pid = pages[current]?.id; setSelectedIds(new Set(elements.filter((e) => e.pageId === pid).map((e) => e.id))); }
+        else selectAllPages();
+      } else if (mod && ev.key.toLowerCase() === "f") { ev.preventDefault(); setShowSearch(true); }
+      else if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); if (selectedIds.size > 0) deleteElements(selectedIds); }
+      else if (ev.key === "Escape") { setSelectedIds(new Set()); setActiveTool("select"); setShowSearch(false); }
+      else if (["ArrowDown","ArrowRight","ArrowUp","ArrowLeft"].includes(ev.key) && selectedIds.size > 0) {
         ev.preventDefault();
-        redo();
-      } else if (mod && ev.key.toLowerCase() === "d") {
-        ev.preventDefault();
-        if (selectedIds.size > 0) duplicateElements(selectedIds);
-      } else if (mod && ev.key.toLowerCase() === "a") {
-        ev.preventDefault();
-        if (elements.length > 0 && activeTool === "select") {
-          const currentPageId = pages[current]?.id;
-          setSelectedIds(new Set(elements.filter((e) => e.pageId === currentPageId).map((e) => e.id)));
-        } else if (mode === "select") {
-          selectAllPages();
-        }
-      } else if (mod && ev.key.toLowerCase() === "f") {
-        ev.preventDefault();
-        setShowSearch(true);
-      } else if (mod && (ev.key === "=" || ev.key === "+")) {
-        ev.preventDefault();
-        setFitMode("custom");
-        setZoom((z) => Math.min(4, +(z + 0.05).toFixed(2)));
-      } else if (mod && ev.key === "-") {
-        ev.preventDefault();
-        setFitMode("custom");
-        setZoom((z) => Math.max(0.25, +(z - 0.05).toFixed(2)));
-      } else if (ev.key === "Delete" || ev.key === "Backspace") {
-        ev.preventDefault();
-        if (selectedIds.size > 0) deleteElements(selectedIds);
-        else if (mode === "select") deleteSelectedPages();
-      } else if (ev.key === "Escape") {
-        setSelectedIds(new Set());
-        setActiveTool("select");
-        setShowSearch(false);
-      } else if (
-        ev.key === "ArrowDown" ||
-        ev.key === "ArrowRight" ||
-        ev.key === "ArrowUp" ||
-        ev.key === "ArrowLeft"
-      ) {
-        if (selectedIds.size > 0) {
-          ev.preventDefault();
-          const amt = ev.shiftKey ? NUDGE_FAST : NUDGE;
-          const dx = ev.key === "ArrowRight" ? amt : ev.key === "ArrowLeft" ? -amt : 0;
-          const dy = ev.key === "ArrowDown" ? amt : ev.key === "ArrowUp" ? -amt : 0;
-          updateElements(selectedIds, (e) => ({ x: e.x + dx, y: e.y + dy }));
-        } else {
-          if (ev.key === "ArrowDown" || ev.key === "ArrowRight") {
-            ev.preventDefault();
-            setCurrent((c) => {
-              const next = Math.min(pages.length - 1, c + 1);
-              document.getElementById(`pdf-page-${next}`)?.scrollIntoView({ behavior: "smooth" });
-              return next;
-            });
-          } else {
-            ev.preventDefault();
-            setCurrent((c) => {
-              const prev = Math.max(0, c - 1);
-              document.getElementById(`pdf-page-${prev}`)?.scrollIntoView({ behavior: "smooth" });
-              return prev;
-            });
-          }
-        }
-      } else if (ev.key === "Home") {
-        ev.preventDefault();
-        setCurrent(0);
-        document.getElementById(`pdf-page-0`)?.scrollIntoView({ behavior: "smooth" });
-      } else if (ev.key === "End") {
-        ev.preventDefault();
-        const last = Math.max(0, pages.length - 1);
-        setCurrent(last);
-        document.getElementById(`pdf-page-${last}`)?.scrollIntoView({ behavior: "smooth" });
+        const amt = ev.shiftKey ? NUDGE_FAST : NUDGE;
+        const dx = ev.key === "ArrowRight" ? amt : ev.key === "ArrowLeft" ? -amt : 0;
+        const dy = ev.key === "ArrowDown" ? amt : ev.key === "ArrowUp" ? -amt : 0;
+        updateElements(selectedIds, (e) => ({ x: e.x + dx, y: e.y + dy }));
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
-    undo,
-    redo,
-    selectAllPages,
-    deleteSelectedPages,
-    deleteElements,
-    duplicateElements,
-    updateElements,
-    pages,
-    current,
-    mode,
-    selectedIds,
-    elements,
-    activeTool,
-  ]);
+    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, selectAllPages, deleteElements, duplicateElements, updateElements, pages, current, selectedIds, elements, activeTool]);
 
   async function runSearch(query: string) {
-    setSearchQuery(query);
-    setSearchActiveIdx(0);
-    if (!pdf || !query.trim()) {
-      setSearchResults([]);
-      return;
-    }
+    setSearchQuery(query); setSearchActiveIdx(0);
+    if (!pdf || !query.trim()) { setSearchResults([]); return; }
     setSearching(true);
     try {
       const results: { pageIndex: number; snippet: string }[] = [];
       for (let i = 0; i < pages.length; i++) {
-        const oi = pages[i].originalIndex;
-        if (oi < 0) continue;
+        const oi = pages[i].originalIndex; if (oi < 0) continue;
         let text = textCacheRef.current[oi];
-        if (text == null) {
-          try {
-            const page = await pdf.getPage(oi + 1);
-            const content = await page.getTextContent?.();
-            text = content ? content.items.map((it) => it.str).join(" ") : "";
-          } catch {
-            text = "";
-          }
-          textCacheRef.current[oi] = text;
-        }
+        if (text == null) { try { const p = await pdf.getPage(oi + 1); const c = await p.getTextContent?.(); text = c ? c.items.map((it) => it.str).join(" ") : ""; } catch { text = ""; } textCacheRef.current[oi] = text; }
         const idx = text.toLowerCase().indexOf(query.toLowerCase());
-        if (idx >= 0) {
-          const start = Math.max(0, idx - 30);
-          results.push({
-            pageIndex: i,
-            snippet: `${start > 0 ? "…" : ""}${text.slice(start, idx + query.length + 30)}…`,
-          });
-        }
+        if (idx >= 0) { const s = Math.max(0, idx - 30); results.push({ pageIndex: i, snippet: `${s > 0 ? "…" : ""}${text.slice(s, idx + query.length + 30)}…` }); }
       }
       setSearchResults(results);
-    } finally {
-      setSearching(false);
-    }
+    } finally { setSearching(false); }
   }
-
-  function jumpToSearchResult(idx: number) {
+  function jumpToResult(idx: number) {
     if (!searchResults.length) return;
-    const clamped = ((idx % searchResults.length) + searchResults.length) % searchResults.length;
-    setSearchActiveIdx(clamped);
-    const pageIndex = searchResults[clamped].pageIndex;
-    setCurrent(pageIndex);
-    document.getElementById(`pdf-page-${pageIndex}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const c = ((idx % searchResults.length) + searchResults.length) % searchResults.length;
+    setSearchActiveIdx(c); const pi = searchResults[c].pageIndex; setCurrent(pi);
+    document.getElementById(`pdf-page-${pi}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  function onImageFileChosen(fileList: FileList | null) {
-    const f = fileList?.[0];
-    if (!f) return;
+  function onImageChosen(fl: FileList | null) {
+    const f = fl?.[0]; if (!f) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const src = String(reader.result);
-      const img = new Image();
-      img.onload = () => {
-        const pageId = pages[current]?.id;
-        if (!pageId) return;
-        const maxW = 220;
-        const s = Math.min(1, maxW / img.width);
-        addElement({
-          id: makeId("img"),
-          pageId,
-          type: "image",
-          x: 60,
-          y: 60,
-          width: img.width * s,
-          height: img.height * s,
-          opacity: 1,
-          rotation: defaultRotation(),
-          src,
-        } as ImageElement);
-      };
+      const src = String(reader.result); const img = new Image();
+      img.onload = () => { const pid = pages[current]?.id; if (!pid) return; const s = Math.min(1, 220 / img.width); addElement({ id: makeId("img"), pageId: pid, type: "image", x: 60, y: 60, width: img.width * s, height: img.height * s, opacity: 1, rotation: 0, src } as ImageElement); };
       img.src = src;
     };
     reader.readAsDataURL(f);
   }
 
-  function openSignature() {
-    setSignatureOpen(true);
-    setSignatureTab("draw");
-    setTypedSignature("");
-  }
-  function clearSignaturePad() {
-    const c = sigCanvasRef.current;
-    const ctx = c?.getContext("2d");
-    ctx?.clearRect(0, 0, c!.width, c!.height);
-  }
   function placeSignature(src: string) {
-    const pageId = pages[current]?.id;
-    if (!pageId) return;
-    addElement({
-      id: makeId("sig"),
-      pageId,
-      type: "image",
-      x: 80,
-      y: 80,
-      width: 180,
-      height: 70,
-      opacity: 1,
-      rotation: defaultRotation(),
-      src,
-    } as ImageElement);
+    const pid = pages[current]?.id; if (!pid) return;
+    addElement({ id: makeId("sig"), pageId: pid, type: "image", x: 80, y: 80, width: 180, height: 70, opacity: 1, rotation: 0, src } as ImageElement);
   }
-  function insertSignature() {
-    if (signatureTab === "draw") {
-      const c = sigCanvasRef.current;
-      if (!c) return;
-      const src = c.toDataURL("image/png");
-      if (saveSigAfterInsert) saveSignature(src);
-      placeSignature(src);
-    } else if (signatureTab === "type") {
-      const name = typedSignature.trim() || "Signature";
-      const canvas = document.createElement("canvas");
-      canvas.width = 480;
-      canvas.height = 140;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.font = "italic 52px 'Times New Roman', serif";
-        ctx.fillStyle = "#111827";
-        ctx.textBaseline = "middle";
-        ctx.fillText(name, 16, 70);
-      }
-      const src = canvas.toDataURL("image/png");
-      if (saveSigAfterInsert) saveSignature(src);
-      placeSignature(src);
-    }
-    setSignatureOpen(false);
-  }
+  function handleSignatureInsert(src: string, save: boolean) { if (save) saveSignature(src); placeSignature(src); setSignatureOpen(false); }
 
   async function apply() {
-    if (processing || busy) return;
-    setProcessing(true);
+    if (processing || busy) return; setProcessing(true);
     try {
-      const selectedIdsForPages = new Set(pages.filter((p) => p.selected).map((p) => p.id));
-      const result = await onApply({ pages, selectedIds: selectedIdsForPages });
+      const result = await onApply({ pages, selectedIds: new Set(pages.filter((p) => p.selected).map((p) => p.id)) });
       if (result && "blob" in result) {
         let finalBlob = result.blob;
-        try {
-          // Save stamps annotations for the editor's current page set.
-          // Extraction uses its own subset in extractPages().
-          const pageIds = new Set(pages.map((p) => p.id));
-          const relevantElements = elements.filter((e) => pageIds.has(e.pageId));
-          finalBlob = await stampElements(result.blob, pages, relevantElements);
-        } catch (e) {
-          console.error("Failed to stamp annotations", e);
-          toast.error("Page changes were saved, but annotations could not be applied.");
-        }
-        let thumbUrl: string | null = null;
-        let resultPageCount = pages.length;
+        try { finalBlob = await stampElements(result.blob, pages, elements); } catch (e) { console.error("Stamp failed", e); toast.error("Saved, but annotations could not be embedded."); }
+        let thumbUrl: string | null = null; let pageCount = pages.length;
         try {
           const { loadPdf, renderPdfPageToCanvas, canvasToBlob } = await import("@/lib/pdf-render");
-          const f = new File([finalBlob], result.filename, { type: "application/pdf" });
-          const doc = await loadPdf(f);
-          resultPageCount = doc.numPages;
-          const canvas = await renderPdfPageToCanvas(doc, 1, 1.2);
-          const b = await canvasToBlob(canvas, "image/png");
-          thumbUrl = URL.createObjectURL(b);
-        } catch {
-          /* ignore preview failure */
-        }
-
-        setSuccess({
-          blob: finalBlob,
-          filename: result.filename,
-          thumb: thumbUrl,
-          pages: resultPageCount,
-        });
+          const doc = await loadPdf(new File([finalBlob], result.filename, { type: "application/pdf" })); pageCount = doc.numPages;
+          const canvas = await renderPdfPageToCanvas(doc, 1, 1.2); const b = await canvasToBlob(canvas, "image/png"); thumbUrl = URL.createObjectURL(b);
+        } catch { /**/ }
+        setSuccess({ blob: finalBlob, filename: result.filename, thumb: thumbUrl, pages: pageCount });
         const url = URL.createObjectURL(finalBlob);
-        publishResult({
-          name: result.filename,
-          mime: "application/pdf",
-          size: finalBlob.size,
-          url,
-          createdAt: Date.now(),
-        });
+        publishResult({ name: result.filename, mime: "application/pdf", size: finalBlob.size, url, createdAt: Date.now() });
       }
-    } finally {
-      setProcessing(false);
-    }
-  }
-
-  function editAgain() {
-    if (success?.thumb) {
-      try {
-        URL.revokeObjectURL(success.thumb);
-      } catch {
-        /* noop */
-      }
-    }
-    setSuccess(null);
+    } finally { setProcessing(false); }
   }
 
   if (phase === "error") {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-100 dark:bg-gray-950 p-4">
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 text-center shadow-xl max-w-md w-full">
-          <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400">
-            <Lock className="h-6 w-6" />
-          </div>
-          <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Couldn't open this PDF</h3>
+          <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-red-50 text-red-600"><Lock className="h-6 w-6" /></div>
+          <h3 className="text-xl font-bold">Couldn't open this PDF</h3>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">{errorMsg}</p>
-          <div className="mt-5 flex justify-center gap-2">
-            <Button
-              variant="outline"
-              onClick={onReplace}
-              className="rounded-lg border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              Choose another file
-            </Button>
-          </div>
+          <Button variant="outline" onClick={onReplace} className="mt-5">Choose another file</Button>
         </div>
       </div>
     );
@@ -969,175 +404,65 @@ export function PdfEditor({
   if (success) {
     return (
       <div className="fixed inset-0 z-[9999] overflow-y-auto bg-gray-100 dark:bg-gray-950 p-4 sm:p-8 flex items-center justify-center">
-        <SuccessScreen
-          result={success}
-          onDownload={() => {
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(success.blob);
-            a.download = success.filename;
-            a.click();
-            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-          }}
-          onEditAgain={editAgain}
-          onNewFile={onReplace}
-        />
+        <SuccessScreen result={success} onDownload={() => { const a = document.createElement("a"); a.href = URL.createObjectURL(success.blob); a.download = success.filename; a.click(); }} onEditAgain={() => setSuccess(null)} onNewFile={onReplace} />
       </div>
     );
   }
 
   const annotateDisabled = !pages[current] || pages[current].rotation !== 0;
+  const shapeTools: { tool: Tool; icon: React.ReactNode; label: string }[] = [
+    { tool: "shape-rect", icon: <Square className="w-4 h-4" />, label: "Rectangle" },
+    { tool: "shape-ellipse", icon: <span className="w-4 h-4 flex items-center justify-center"><svg width="14" height="14"><ellipse cx="7" cy="7" rx="6" ry="6" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></span>, label: "Ellipse" },
+    { tool: "shape-line", icon: <Minus className="w-4 h-4" />, label: "Line" },
+    { tool: "shape-arrow", icon: <ArrowRight className="w-4 h-4" />, label: "Arrow" },
+    { tool: "shape-triangle", icon: <Triangle className="w-4 h-4" />, label: "Triangle" },
+    { tool: "shape-star", icon: <Star className="w-4 h-4" />, label: "Star" },
+    { tool: "shape-rounded-rect", icon: <span className="w-4 h-4 flex items-center justify-center"><svg width="14" height="14"><rect x="1" y="2" width="12" height="10" rx="3" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></span>, label: "Rounded" },
+    { tool: "shape-speech", icon: <MessageSquare className="w-4 h-4" />, label: "Bubble" },
+  ];
+  const activeShapeEntry = shapeTools.find((s) => s.tool === activeShape);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden select-none font-sans text-gray-900 dark:text-gray-100">
-      <p className="sr-only">
-        Edit PDF online for free, directly in your browser. Add and format text, insert images
-        and signatures, highlight, draw, and fill form fields on any PDF page. Style your text
-        preview in {FONT_PREVIEW_CHOICES.length}+ fonts including Arial, Georgia, Garamond, Times
-        New Roman, Helvetica, Courier, Roboto, Montserrat, Open Sans, Playfair Display, and more,
-        then export a clean PDF with embedded standard fonts. No sign-up required.
-      </p>
-      <input
-        ref={imageInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/svg+xml"
-        className="hidden"
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-          onImageFileChosen(e.target.files);
-          e.target.value = "";
-        }}
-      />
+    <div className="fixed inset-0 z-[9999] flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden select-none font-sans">
+      <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onImageChosen(e.target.files); e.target.value = ""; }} />
 
+      {/* HEADER */}
       <header className="h-12 shrink-0 flex items-center justify-between gap-3 px-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 z-30">
         <div className="flex items-center gap-2 min-w-0">
-          <button
-            onClick={onReplace}
-            title="Back"
-            aria-label="Back to file picker"
-            className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 shrink-0" />
-          <span className="text-sm font-semibold truncate max-w-[220px] sm:max-w-[420px] text-gray-800 dark:text-gray-100">
-            {file.name}
-          </span>
+          <button onClick={onReplace} className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"><ArrowLeft className="w-4 h-4" /></button>
+          <div className="w-px h-5 bg-gray-200 dark:bg-gray-700" />
+          <span className="text-sm font-semibold truncate max-w-[220px] sm:max-w-[420px]">{file.name}</span>
         </div>
-
         <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={undo}
-            disabled={!canUndo}
-            title="Undo (Ctrl+Z)"
-            aria-label="Undo"
-            className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-          >
-            <Undo2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={redo}
-            disabled={!canRedo}
-            title="Redo (Ctrl+Shift+Z)"
-            aria-label="Redo"
-            className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-          >
-            <Redo2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setShowSearch((s) => !s)}
-            title="Search (Ctrl+F)"
-            aria-label="Search document"
-            className={cn(
-              "p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors",
-              showSearch ? "text-[#DC2626] bg-red-50 dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300"
-            )}
-          >
-            <Search className="w-4 h-4" />
-          </button>
+          <button onClick={undo} disabled={!canUndo} className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:pointer-events-none" title="Undo (Ctrl+Z)"><Undo2 className="w-4 h-4" /></button>
+          <button onClick={redo} disabled={!canRedo} className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:pointer-events-none" title="Redo (Ctrl+Shift+Z)"><Redo2 className="w-4 h-4" /></button>
+          <button onClick={() => setShowSearch((s) => !s)} className={cn("p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800", showSearch ? "text-[#DC2626] bg-red-50 dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300")} title="Search (Ctrl+F)"><Search className="w-4 h-4" /></button>
           <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 hidden sm:block" />
-          <Button
-            onClick={apply}
-            disabled={processing || busy}
-            size="sm"
-            className="hidden sm:inline-flex h-8 rounded-md bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm px-3 gap-1.5"
-          >
+          <Button onClick={apply} disabled={processing || busy} size="sm" className="hidden sm:inline-flex h-8 rounded-md bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm px-3 gap-1.5">
             {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {processing ? "Saving…" : actionLabel || "Save changes"}
           </Button>
         </div>
       </header>
 
+      {/* SEARCH BAR */}
       <AnimatePresence>
         {showSearch && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden z-20"
-          >
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden z-20">
             <div className="flex items-center gap-2 px-3 py-2">
               <Search className="w-4 h-4 text-gray-400 shrink-0" />
-              <input
-                autoFocus
-                value={searchQuery}
-                onChange={(e) => runSearch(e.target.value)}
-                placeholder="Search in document…"
-                className="flex-1 h-8 text-sm bg-transparent outline-none text-gray-800 dark:text-gray-100 placeholder:text-gray-400"
-              />
+              <input autoFocus value={searchQuery} onChange={(e) => runSearch(e.target.value)} placeholder="Search in document…" className="flex-1 h-8 text-sm bg-transparent outline-none text-gray-800 dark:text-gray-100 placeholder:text-gray-400" />
               {searching && <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 shrink-0" />}
-              {!searching && searchQuery && (
-                <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 tabular-nums">
-                  {searchResults.length > 0 ? `${searchActiveIdx + 1} / ${searchResults.length}` : "No results"}
-                </span>
-              )}
-              <button
-                onClick={() => jumpToSearchResult(searchActiveIdx - 1)}
-                disabled={searchResults.length === 0}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-600 dark:text-gray-300"
-                title="Previous result"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => jumpToSearchResult(searchActiveIdx + 1)}
-                disabled={searchResults.length === 0}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-600 dark:text-gray-300"
-                title="Next result"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => {
-                  setShowSearch(false);
-                  setSearchQuery("");
-                  setSearchResults([]);
-                }}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
-                title="Close search"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              {!searching && searchQuery && <span className="text-xs text-gray-500 shrink-0">{searchResults.length > 0 ? `${searchActiveIdx + 1} / ${searchResults.length}` : "No results"}</span>}
+              <button onClick={() => jumpToResult(searchActiveIdx - 1)} disabled={!searchResults.length} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-600 dark:text-gray-300"><ChevronLeft className="w-4 h-4" /></button>
+              <button onClick={() => jumpToResult(searchActiveIdx + 1)} disabled={!searchResults.length} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-600 dark:text-gray-300"><ChevronRight className="w-4 h-4" /></button>
+              <button onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><X className="w-4 h-4" /></button>
             </div>
-            {searchResults.length > 0 && (
-              <div className="max-h-32 overflow-y-auto border-t border-gray-100 dark:border-gray-800 px-3 py-1">
-                {searchResults.map((r, i) => (
-                  <button
-                    key={`${r.pageIndex}-${i}`}
-                    onClick={() => jumpToSearchResult(i)}
-                    className={cn(
-                      "w-full text-left text-xs py-1.5 px-2 rounded-md flex gap-2 items-start hover:bg-gray-50 dark:hover:bg-gray-800",
-                      i === searchActiveIdx && "bg-red-50 dark:bg-red-900/20"
-                    )}
-                  >
-                    <span className="font-semibold text-gray-400 shrink-0">p.{r.pageIndex + 1}</span>
-                    <span className="text-gray-600 dark:text-gray-300 truncate">{r.snippet}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
 
+      {/* TOOLBAR */}
       <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-x-auto z-20">
         <ToolBtn icon={<MousePointer2 />} label="Select" active={activeTool === "select"} onClick={() => { setActiveTool("select"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<Hand />} label="Hand" active={activeTool === "hand"} onClick={() => { setActiveTool("hand"); setSelectedIds(new Set()); }} />
@@ -1145,710 +470,251 @@ export function PdfEditor({
         <ToolBtn icon={<Type />} label="Text" active={activeTool === "text"} disabled={annotateDisabled} onClick={() => { setActiveTool("text"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<ImageIcon />} label="Image" active={activeTool === "image"} disabled={annotateDisabled} onClick={() => { setActiveTool("image"); imageInputRef.current?.click(); }} />
         <ToolBtn icon={<PenLine />} label="Draw" active={activeTool === "draw"} disabled={annotateDisabled} onClick={() => { setActiveTool("draw"); setSelectedIds(new Set()); }} />
-        <ToolBtn icon={<Highlighter />} label="Highlight" active={activeTool === "highlight"} disabled={annotateDisabled} onClick={() => { setActiveTool("highlight"); setSelectedIds(new Set()); }} />
         <ToolBtn icon={<Eraser />} label="Eraser" active={activeTool === "eraser"} disabled={annotateDisabled} onClick={() => { setActiveTool("eraser"); setSelectedIds(new Set()); }} />
-        
-        <div className="relative shrink-0" ref={shapesBtnRef}>
-          <ToolBtn
-            icon={<Square />}
-            label="Shapes"
-            active={activeTool.startsWith("shape") || activeTool === "emoji"}
-            disabled={annotateDisabled}
-            onClick={() => setShowShapesMenu((s) => !s)}
-          />
-          {showShapesMenu && (
-            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 flex items-center gap-1 z-50">
-              <button onClick={() => { setActiveTool("shape-line"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded flex items-center justify-center", activeTool === "shape-line" ? "bg-red-50 dark:bg-red-900/30 text-[#DC2626]" : "hover:bg-gray-100 dark:hover:bg-gray-800")} title="Line"><Minus className="w-4 h-4" /></button>
-              <button onClick={() => { setActiveTool("shape-rect"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded flex items-center justify-center", activeTool === "shape-rect" ? "bg-red-50 dark:bg-red-900/30 text-[#DC2626]" : "hover:bg-gray-100 dark:hover:bg-gray-800")} title="Rectangle"><Square className="w-4 h-4" /></button>
-              <button onClick={() => { setActiveTool("shape-ellipse"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded-full flex items-center justify-center border", activeTool === "shape-ellipse" ? "bg-red-50 dark:bg-red-900/30 border-[#DC2626]" : "border-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800")} title="Ellipse" />
-              <button onClick={() => { setActiveTool("emoji"); setShowShapesMenu(false); }} className={cn("w-9 h-9 rounded flex items-center justify-center text-lg", activeTool === "emoji" ? "bg-red-50 dark:bg-red-900/30" : "hover:bg-gray-100 dark:hover:bg-gray-800")} title="Emoji">🙂</button>
-            </div>
-          )}
+        <ToolBtn icon={<Highlighter />} label="Highlight" active={activeTool === "highlight"} disabled={annotateDisabled} onClick={() => { setActiveTool("highlight"); setSelectedIds(new Set()); }} />
+
+        {/* Shape picker button */}
+        <div ref={shapeBtnRef} className="relative shrink-0">
+          <button disabled={annotateDisabled} onClick={() => {
+            if (!showShapePicker && shapeBtnRef.current) { const r = shapeBtnRef.current.getBoundingClientRect(); setShapePickerPos({ top: r.bottom + 4, left: r.left }); }
+            setShowShapePicker((s) => !s);
+          }} className={cn("flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 transition-colors", activeTool.startsWith("shape") ? "bg-red-50 text-[#DC2626] dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800", annotateDisabled && "opacity-35 pointer-events-none")}>
+            <span className="w-4 h-4 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4">{activeShapeEntry?.icon ?? <Square className="w-4 h-4" />}</span>
+            <span className="hidden md:inline">Shapes</span>
+            <ChevronDown className="w-3 h-3" />
+          </button>
         </div>
 
-        <ToolBtn icon={<PenTool />} label="Sign" active={activeTool === "signature"} disabled={annotateDisabled} onClick={() => { setActiveTool("signature"); openSignature(); }} />
-        
+        <ToolBtn icon={<PenTool />} label="Sign" active={activeTool === "signature"} disabled={annotateDisabled} onClick={() => { setActiveTool("signature"); setSignatureOpen(true); }} />
         <Divider />
-        <button
-          onClick={() => rotatePage(current, 90)}
-          title="Rotate page"
-          aria-label="Rotate page"
-          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-          <RotateCw className="w-4 h-4" />
-          <span className="hidden md:inline">Rotate</span>
-        </button>
-        <button
-          onClick={() => duplicatePage(current)}
-          title="Duplicate page"
-          aria-label="Duplicate page"
-          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-          <Copy className="w-4 h-4" />
-          <span className="hidden md:inline">Duplicate</span>
-        </button>
-        <button
-          onClick={() => clearPage(pages[current]?.id)}
-          title="Clear page annotations"
-          aria-label="Clear page annotations"
-          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-          <Eraser className="w-4 h-4" />
-          <span className="hidden md:inline">Clear</span>
-        </button>
-        <button
-          onClick={() => extractPages([current])}
-          title="Extract current page"
-          aria-label="Extract current page"
-          className="flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-          <Download className="w-4 h-4" />
-          <span className="hidden md:inline">Extract</span>
-        </button>
+        <div ref={moreBtnRef} className="relative shrink-0">
+          <ToolBtn icon={<MoreHorizontal />} label="More" active={showMoreTools || ["whiteout","sticky"].includes(activeTool)} disabled={annotateDisabled}
+            onClick={() => { if (!showMoreTools && moreBtnRef.current) { const r = moreBtnRef.current.getBoundingClientRect(); setMoreToolsPos({ top: r.bottom + 4, left: r.left }); } setShowMoreTools((s) => !s); }} />
+        </div>
 
-        {["draw", "shape-rect", "shape-ellipse", "shape-line", "text"].includes(activeTool) && (
-          <div className="flex items-center gap-1.5 px-2">
-            <Divider />
-            {PALETTE.map((c) => (
-              <button
-                key={c}
-                onClick={() => setBrushColor(c)}
-                style={{ backgroundColor: c }}
-                className={cn(
-                  "shrink-0 w-5 h-5 rounded-full border border-gray-200 dark:border-gray-700 transition-transform",
-                  brushColor === c && "ring-2 ring-[#DC2626] scale-110"
-                )}
-                title="Brush Color"
-                aria-label="Brush Color"
-              />
-            ))}
-            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-            <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-1 shrink-0">
-              <button
-                onClick={() => setBrushSize((s) => Math.max(1, s - 1))}
-                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-                aria-label="Decrease size"
-              >
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              <span className="text-xs font-medium w-9 text-center tabular-nums">{brushSize} pt</span>
-              <button
-                onClick={() => setBrushSize((s) => Math.min(24, s + 1))}
-                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-                aria-label="Increase size"
-              >
-                <ChevronDown className="w-3 h-3 rotate-180" />
-              </button>
-            </div>
+        {/* Draw settings inline */}
+        {activeTool === "draw" && (
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700">
+            <span className="text-xs text-gray-400 hidden sm:block">Ink</span>
+            <input type="color" value={drawStroke.color} onChange={(e) => setDrawStroke((s) => ({ ...s, color: e.target.value }))} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0" />
+            <input type="range" min={1} max={20} value={drawStroke.width} onChange={(e) => setDrawStroke((s) => ({ ...s, width: Number(e.target.value) }))} className="w-16 accent-[#DC2626]" />
+            <span className="text-xs text-gray-400 w-4">{drawStroke.width}</span>
           </div>
         )}
-        
-        {activeTool === "highlight" && (
-          <div className="flex items-center gap-1.5 px-2">
-            <Divider />
-            {HIGHLIGHT_PALETTE.map((c) => (
-              <button
-                key={c}
-                onClick={() => setHighlightColor(c)}
-                style={{ backgroundColor: c }}
-                className={cn(
-                  "shrink-0 w-5 h-5 rounded-full border border-gray-200 dark:border-gray-700 transition-transform",
-                  highlightColor === c && "ring-2 ring-[#DC2626] scale-110"
-                )}
-                title="Highlight Color"
-                aria-label="Highlight Color"
-              />
-            ))}
-            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-            <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-1 shrink-0">
-              <button
-                onClick={() => setBrushSize((s) => Math.max(1, s - 1))}
-                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-                aria-label="Decrease size"
-              >
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              <span className="text-xs font-medium w-9 text-center tabular-nums">{brushSize} pt</span>
-              <button
-                onClick={() => setBrushSize((s) => Math.min(24, s + 1))}
-                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-                aria-label="Increase size"
-              >
-                <ChevronDown className="w-3 h-3 rotate-180" />
-              </button>
-            </div>
+        {activeTool === "eraser" && (
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700">
+            <span className="text-xs text-gray-400 hidden sm:block">Size</span>
+            <input type="range" min={5} max={60} value={eraserSize} onChange={(e) => setEraserSize(Number(e.target.value))} className="w-16 accent-[#DC2626]" />
+            <span className="text-xs text-gray-400 w-4">{eraserSize}</span>
           </div>
         )}
-
-        {activeTool === "emoji" && (
-          <div className="flex items-center gap-1.5 px-2 max-w-xs sm:max-w-md overflow-x-auto overflow-y-hidden shrink-0">
-            <Divider />
-            {EMOJI_LIST.map((emoji) => (
-              <button
-                key={emoji}
-                onClick={() => setSelectedEmoji(emoji)}
-                className={cn(
-                  "w-7 h-7 shrink-0 rounded flex items-center justify-center text-lg hover:bg-gray-100 dark:hover:bg-gray-800",
-                  selectedEmoji === emoji && "bg-red-50 dark:bg-red-900/30"
-                )}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {activeTool === "select" && singleSelected?.type === "text" && (
-          <div className="flex items-center gap-1.5 px-2">
-            <Divider />
-            <select
-              value={(singleSelected as TextElement).font}
-              onChange={(e) => updateElement(singleSelected.id, { font: e.target.value as TextElement["font"] })}
-              className="h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1.5 text-xs"
-            >
-              {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f === "TimesRoman" ? "Times New Roman" : f}</option>)}
-            </select>
-            <input
-              type="number"
-              min={6} max={96}
-              value={(singleSelected as TextElement).fontSize}
-              onChange={(e) => updateElement(singleSelected.id, { fontSize: Number(e.target.value) })}
-              className="w-12 h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center"
-            />
-            <div className="flex items-center gap-0.5 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-0.5 shrink-0">
-              <button onClick={() => updateElement(singleSelected.id, { bold: !(singleSelected as TextElement).bold })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).bold && "bg-red-50 text-[#DC2626]")}><Bold className="w-3.5 h-3.5" /></button>
-              <button onClick={() => updateElement(singleSelected.id, { italic: !(singleSelected as TextElement).italic })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).italic && "bg-red-50 text-[#DC2626]")}><Italic className="w-3.5 h-3.5" /></button>
-              <button onClick={() => updateElement(singleSelected.id, { underline: !(singleSelected as TextElement).underline })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).underline && "bg-red-50 text-[#DC2626]")}><UnderlineIcon className="w-3.5 h-3.5" /></button>
-            </div>
-            <input
-              type="color"
-              value={(singleSelected as TextElement).color}
-              onChange={(e) => updateElement(singleSelected.id, { color: e.target.value })}
-              className="w-7 h-7 rounded cursor-pointer border border-gray-200 dark:border-gray-700 shrink-0"
-              title="Text color"
-            />
-            <div className="flex items-center gap-0.5 border border-gray-200 dark:border-gray-700 rounded-md h-7 px-0.5 shrink-0">
-              <button onClick={() => updateElement(singleSelected.id, { align: "left" })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).align === "left" && "bg-red-50 text-[#DC2626]")}><AlignLeft className="w-3.5 h-3.5" /></button>
-              <button onClick={() => updateElement(singleSelected.id, { align: "center" })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).align === "center" && "bg-red-50 text-[#DC2626]")}><AlignCenter className="w-3.5 h-3.5" /></button>
-              <button onClick={() => updateElement(singleSelected.id, { align: "right" })} className={cn("w-6 h-6 rounded flex items-center justify-center", (singleSelected as TextElement).align === "right" && "bg-red-50 text-[#DC2626]")}><AlignRight className="w-3.5 h-3.5" /></button>
-            </div>
-          </div>
-        )}
-
         <div className="ml-auto sm:hidden">
-          <Button
-            onClick={apply}
-            disabled={processing || busy}
-            size="sm"
-            className="h-8 rounded-md bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-xs px-3 gap-1.5"
-          >
-            {processing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            Save
+          <Button onClick={apply} disabled={processing || busy} size="sm" className="h-8 rounded-md bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-xs px-3 gap-1.5">
+            {processing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Save
           </Button>
         </div>
       </div>
 
-      {isMobile && showLeftSidebar && (
-        <div
-          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
-          onClick={() => setShowLeftSidebar(false)}
-        />
+      {/* Portals */}
+      {typeof document !== "undefined" && createPortal(
+        <>
+          <AnimatePresence>
+            {showMoreTools && moreToolsPos && (
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} style={{ position: "fixed", top: moreToolsPos.top, left: moreToolsPos.left }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 w-44 z-[10000]">
+                <button onClick={() => { setActiveTool("whiteout"); setSelectedIds(new Set()); setShowMoreTools(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"><Eraser className="w-4 h-4" /> Whiteout</button>
+                <button onClick={() => { setActiveTool("sticky"); setSelectedIds(new Set()); setShowMoreTools(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"><MessageSquare className="w-4 h-4" /> Sticky note</button>
+                <div className="h-px bg-gray-100 dark:bg-gray-800 my-1" />
+                {(["field-text","field-checkbox","field-radio","field-dropdown"] as Tool[]).map((t) => (
+                  <button key={t} onClick={() => { setActiveTool(t); setSelectedIds(new Set()); setShowMoreTools(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">{t.replace("field-", "").replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase())}</button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {showShapePicker && shapePickerPos && (
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} style={{ position: "fixed", top: shapePickerPos.top, left: shapePickerPos.left }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 z-[10000] grid grid-cols-4 gap-1 w-52">
+                {shapeTools.map((s) => (
+                  <button key={s.tool} title={s.label} onClick={() => { setActiveShape(s.tool); setActiveTool(s.tool); setSelectedIds(new Set()); setShowShapePicker(false); }}
+                    className={cn("flex flex-col items-center gap-1 p-2 rounded-md text-xs transition-colors", activeTool === s.tool ? "bg-red-50 text-[#DC2626] dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800")}>
+                    <span className="w-4 h-4 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4">{s.icon}</span>
+                    <span className="leading-none text-center">{s.label}</span>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>,
+        document.body
       )}
 
+      {/* BODY */}
       <div className="flex-1 flex overflow-hidden relative">
+        {/* LEFT SIDEBAR */}
         <AnimatePresence initial={false}>
           {showLeftSidebar && (
-            <motion.aside
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 200, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.18 }}
-              className={cn(
-                "bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all",
-                isMobile ? "fixed inset-y-0 left-0 z-40 shadow-xl" : "border-r border-gray-200 dark:border-gray-800 z-10"
-              )}
-            >
+            <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 200, opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 z-10">
               <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                  Pages · {pages.length}
-                </span>
-                <button
-                  onClick={() => insertBlankPageAfter(pages.length - 1)}
-                  className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
-                  title="Add blank page"
-                  aria-label="Add blank page"
-                >
-                  <FilePlus className="h-3.5 w-3.5" />
-                </button>
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Pages · {pages.length}</span>
+                <button onClick={() => insertBlankPage(pages.length - 1)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500" title="Add blank page"><FilePlus className="h-3.5 w-3.5" /></button>
               </div>
-
               <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
                 {pages.map((p, i) => (
-                  <div
-                    key={p.id}
-                    onClick={(e) => handlePageClick(i, e)}
-                    draggable={mode === "reorder"}
-                    onDragStart={(event) => {
-                      if (mode !== "reorder") return;
-                      setDraggedPageId(p.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", p.id);
-                    }}
-                    onDragEnd={() => setDraggedPageId(null)}
-                    onDragOver={(event) => {
-                      if (mode === "reorder") event.preventDefault();
-                    }}
-                    onDrop={(event) => {
-                      if (mode === "reorder") handlePageDrop(i, event);
-                    }}
-                    className={cn(
-                      "group relative rounded-md border p-1.5 transition-all cursor-pointer flex gap-2 items-center",
-                      mode === "reorder" && "cursor-grab active:cursor-grabbing",
-                      draggedPageId === p.id && "opacity-40",
-                      current === i
-                        ? "border-[#DC2626] bg-red-50/60 dark:bg-red-900/20"
-                        : searchMatchPages.has(i)
-                        ? "border-[#DC2626]/50 bg-red-50/30 dark:bg-red-900/10"
-                        : "border-transparent hover:bg-gray-50 dark:hover:bg-gray-800"
-                    )}
-                  >
-                    <div
-                      className="w-11 aspect-[3/4] bg-white border border-gray-200 dark:border-gray-700 overflow-hidden relative shrink-0 flex items-center justify-center rounded"
-                      style={{ transform: `rotate(${p.rotation}deg)` }}
-                    >
-                      {p.isBlank ? (
-                        <div className="w-full h-full bg-white" />
-                      ) : thumbs[p.originalIndex] ? (
-                        <img
-                          src={thumbs[p.originalIndex]}
-                          alt={`Page ${i + 1}`}
-                          className="w-full h-full object-contain pointer-events-none"
-                        />
-                      ) : (
-                        <div className="w-full h-full animate-pulse bg-gray-100 dark:bg-gray-800" />
-                      )}
+                  <div key={p.id} onClick={(e) => handlePageClick(i, e)} className={cn("group relative rounded-md border p-1.5 cursor-pointer flex gap-2 items-center", current === i ? "border-[#DC2626] bg-red-50/60 dark:bg-red-900/20" : "border-transparent hover:bg-gray-50 dark:hover:bg-gray-800")}>
+                    <div className="w-11 aspect-[3/4] bg-white border border-gray-200 dark:border-gray-700 overflow-hidden rounded shrink-0 flex items-center justify-center" style={{ transform: `rotate(${p.rotation}deg)` }}>
+                      {thumbs[p.originalIndex] ? <img src={thumbs[p.originalIndex]} alt={`Page ${i + 1}`} className="w-full h-full object-contain pointer-events-none" /> : <div className="w-full h-full animate-pulse bg-gray-100 dark:bg-gray-800" />}
                     </div>
-
                     <div className="flex-1 min-w-0 flex items-center justify-between">
-                      <span
-                        className={cn(
-                          "text-xs font-medium",
-                          current === i ? "text-[#DC2626]" : "text-gray-600 dark:text-gray-300"
-                        )}
-                      >
-                        {i + 1}
-                      </span>
+                      <span className={cn("text-xs font-medium", current === i ? "text-[#DC2626]" : "text-gray-600 dark:text-gray-300")}>{i + 1}</span>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {mode === "reorder" && (
-                          <>
-                            <button
-                              onClick={(e: ReactMouseEvent) => { e.stopPropagation(); movePage(i, i - 1); }}
-                              disabled={i === 0}
-                              className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
-                              title="Move page up"
-                              aria-label={`Move page ${i + 1} up`}
-                            >
-                              <ArrowUp className="h-3 w-3" />
-                            </button>
-                            <button
-                              onClick={(e: ReactMouseEvent) => { e.stopPropagation(); movePage(i, i + 1); }}
-                              disabled={i === pages.length - 1}
-                              className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
-                              title="Move page down"
-                              aria-label={`Move page ${i + 1} down`}
-                            >
-                              <ArrowDown className="h-3 w-3" />
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={(e: ReactMouseEvent) => { e.stopPropagation(); duplicatePage(i); }}
-                          className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100"
-                          title="Duplicate page"
-                          aria-label="Duplicate page"
-                        >
-                          <Copy className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={(e: ReactMouseEvent) => { e.stopPropagation(); rotatePage(i, 90); }}
-                          className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100"
-                          title="Rotate page"
-                          aria-label="Rotate page"
-                        >
-                          <RotateCw className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={(e: ReactMouseEvent) => { e.stopPropagation(); clearPage(p.id); }}
-                          className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100"
-                          title="Clear annotations"
-                          aria-label="Clear annotations"
-                        >
-                          <Eraser className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={(e: ReactMouseEvent) => { e.stopPropagation(); deletePage(i); }}
-                          className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-600"
-                          title="Delete page"
-                          aria-label="Delete page"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                        <button onClick={(e: ReactMouseEvent) => { e.stopPropagation(); duplicatePage(i); }} className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700" title="Duplicate"><Copy className="h-3 w-3" /></button>
+                        <button onClick={(e: ReactMouseEvent) => { e.stopPropagation(); rotatePage(i, 90); }} className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700" title="Rotate"><RotateCw className="h-3 w-3" /></button>
+                        <button onClick={(e: ReactMouseEvent) => { e.stopPropagation(); deletePage(i); }} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600" title="Delete"><Trash2 className="h-3 w-3" /></button>
                       </div>
                     </div>
                   </div>
                 ))}
-
-                <button
-                  onClick={() => insertBlankPageAfter(pages.length - 1)}
-                  className="w-full mt-1 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 dark:border-gray-700 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:border-[#DC2626] hover:text-[#DC2626] transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add page
-                </button>
+                <button onClick={() => insertBlankPage(pages.length - 1)} className="w-full mt-1 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 dark:border-gray-700 py-2 text-xs font-medium text-gray-500 hover:border-[#DC2626] hover:text-[#DC2626] transition-colors"><Plus className="h-3.5 w-3.5" /> Add page</button>
               </div>
             </motion.aside>
           )}
         </AnimatePresence>
-
-        <button
-          onClick={() => {
-            setShowLeftSidebar((s) => !s);
-          }}
-          className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] border border-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md transition-colors"
-          style={{ left: showLeftSidebar && !isMobile ? 200 : 0 }}
-          title={showLeftSidebar ? "Hide pages panel" : "Show pages panel"}
-          aria-label={showLeftSidebar ? "Hide pages panel" : "Show pages panel"}
-        >
+        <button onClick={() => setShowLeftSidebar((s) => !s)} className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md" style={{ left: showLeftSidebar ? 200 : 0 }}>
           {showLeftSidebar ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </button>
 
+        {/* CENTER */}
         <main className="flex-1 relative overflow-hidden flex flex-col bg-[#EDEEF1] dark:bg-gray-950">
           {phase === "reading" || phase === "rendering" ? (
-            <div className="m-auto flex flex-col items-center gap-3 text-gray-500 dark:text-gray-400">
-              <Loader2 className="h-7 w-7 animate-spin text-[#DC2626]" />
-              <span className="text-sm font-medium">Rendering document…</span>
-            </div>
+            <div className="m-auto flex flex-col items-center gap-3 text-gray-500"><Loader2 className="h-7 w-7 animate-spin text-[#DC2626]" /><span className="text-sm font-medium">Rendering…</span></div>
           ) : (
-            <PreviewCanvas
-              pdf={pdf}
-              pages={pages}
-              zoom={zoom}
-              fitMode={fitMode}
-              current={current}
-              onCurrentChange={setCurrent}
-              phase="ready"
-              onToggleSelect={() => {}}
-              selectionMode={false}
-              elements={elements}
-              activeTool={activeTool}
-              selectedIds={selectedIds}
-              onSetSelectedIds={setSelectedIds}
-              onAddElement={addElement}
-              onAddElementKeepTool={addElementKeepTool}
-              onUpdateElement={updateElement}
-              onUpdateElements={updateElements}
-              onDuplicateElements={duplicateElements}
-              onDeleteElements={deleteElements}
-              panStateRef={panStateRef}
-              textPreviewFonts={textPreviewFonts}
-              isMobile={isMobile}
-              brushColor={brushColor}
-              highlightColor={highlightColor}
-              brushSize={brushSize}
-              selectedEmoji={selectedEmoji}
+            <PreviewCanvas pdf={pdf} pages={pages} zoom={zoom} fitMode={fitMode} current={current} onCurrentChange={setCurrent} phase="ready"
+              onToggleSelect={() => {}} selectionMode={false} elements={elements} activeTool={activeTool}
+              selectedIds={selectedIds} onSetSelectedIds={setSelectedIds} onAddElement={addElement}
+              onAddElementKeepTool={addElementKeepTool} onUpdateElement={updateElement}
+              onUpdateElements={updateElements} onDuplicateElements={duplicateElements}
+              onReplaceElements={replaceElements} panStateRef={panStateRef}
+              textPreviewFonts={textPreviewFonts} drawStroke={drawStroke} eraserSize={eraserSize}
             />
           )}
-
+          {/* BOTTOM BAR */}
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[#1F2937]/95 text-white px-2.5 py-1.5 rounded-lg shadow-lg flex items-center gap-2 z-30 backdrop-blur-sm text-xs">
-            <button
-              onClick={() => {
-                const next = Math.max(0, current - 1);
-                setCurrent(next);
-                document.getElementById(`pdf-page-${next}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-              }}
-              disabled={current === 0}
-              className="p-1 rounded hover:bg-white/20 disabled:opacity-30"
-              title="Previous page"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
+            <button onClick={() => { const n = Math.max(0, current - 1); setCurrent(n); document.getElementById(`pdf-page-${n}`)?.scrollIntoView({ behavior: "smooth" }); }} disabled={current === 0} className="p-1 rounded hover:bg-white/20 disabled:opacity-30"><ChevronLeft className="h-3.5 w-3.5" /></button>
             <span className="font-medium px-1 tabular-nums">{current + 1} / {pages.length}</span>
-            <button
-              onClick={() => {
-                const next = Math.min(pages.length - 1, current + 1);
-                setCurrent(next);
-                document.getElementById(`pdf-page-${next}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-              }}
-              disabled={current === pages.length - 1}
-              className="p-1 rounded hover:bg-white/20 disabled:opacity-30"
-              title="Next page"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-
+            <button onClick={() => { const n = Math.min(pages.length - 1, current + 1); setCurrent(n); document.getElementById(`pdf-page-${n}`)?.scrollIntoView({ behavior: "smooth" }); }} disabled={current === pages.length - 1} className="p-1 rounded hover:bg-white/20 disabled:opacity-30"><ChevronRight className="h-3.5 w-3.5" /></button>
             <div className="w-px h-4 bg-white/20" />
-
-            <button
-              onClick={() => { setFitMode("custom"); setZoom((z) => Math.max(0.25, +(z - 0.05).toFixed(2))); }}
-              className="p-1 rounded hover:bg-white/20"
-              title="Zoom out"
-            >
-              <span className="sr-only">Zoom out</span>
-              <ZoomOutIcon />
-            </button>
+            <button onClick={() => { setFitMode("custom"); setZoom((z) => Math.max(0.25, +(z - 0.05).toFixed(2))); }} className="p-1 rounded hover:bg-white/20" title="Zoom out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12" /></svg></button>
             <span className="font-medium w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-            <button
-              onClick={() => { setFitMode("custom"); setZoom((z) => Math.min(4, +(z - 0.05).toFixed(2))); }}
-              className="p-1 rounded hover:bg-white/20"
-              title="Zoom in"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-
+            <button onClick={() => { setFitMode("custom"); setZoom((z) => Math.min(4, +(z + 0.05).toFixed(2))); }} className="p-1 rounded hover:bg-white/20" title="Zoom in"><Plus className="h-3.5 w-3.5" /></button>
             <div className="w-px h-4 bg-white/20" />
-
-            <button
-              onClick={() => setFitMode("width")}
-              className={cn("p-1 rounded hover:bg-white/20", fitMode === "width" && "bg-white/25")}
-              title="Fit to width"
-            >
-              <ArrowLeftRight className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => setFitMode("page")}
-              className={cn("p-1 rounded hover:bg-white/20", fitMode === "page" && "bg-white/25")}
-              title="Fit entire page"
-            >
-              <Maximize2 className="h-3.5 w-3.5" />
-            </button>
+            <button onClick={() => setFitMode("width")} className={cn("p-1 rounded hover:bg-white/20", fitMode === "width" && "bg-white/25")} title="Fit width"><ArrowLeftRight className="h-3.5 w-3.5" /></button>
+            <button onClick={() => setFitMode("page")} className={cn("p-1 rounded hover:bg-white/20", fitMode === "page" && "bg-white/25")} title="Fit page"><Maximize2 className="h-3.5 w-3.5" /></button>
           </div>
         </main>
+
+        <button onClick={() => setShowRightSidebar((s) => !s)} className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] rounded-l-lg py-3 px-1.5 text-white shadow-md" style={{ right: showRightSidebar ? 260 : 0 }}>
+          {showRightSidebar ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+        </button>
+
+        {/* RIGHT SIDEBAR */}
+        <AnimatePresence initial={false}>
+          {showRightSidebar && (
+            <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 260, opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 flex flex-col shrink-0 z-10">
+              <div className="flex-1 overflow-y-auto">
+                <ContextPropertiesPanel selectedElements={selectedElements} singleSelected={singleSelected} activeTool={activeTool}
+                  eraserSize={eraserSize} onEraserSizeChange={setEraserSize}
+                  onUpdateElement={updateElement} onUpdateElements={(patch) => updateElements(selectedIds, () => patch)}
+                  onDeleteElements={() => deleteElements(selectedIds)} onDuplicateElements={() => duplicateElements(selectedIds)}
+                  onImageReplace={() => imageInputRef.current?.click()}
+                  onBringToFront={() => reorderZ(selectedIds, "front")} onSendToBack={() => reorderZ(selectedIds, "back")}
+                  onRotatePage={() => rotatePage(current, 90)} onDuplicatePage={() => duplicatePage(current)}
+                  onExtractPage={() => {}}
+                  textPreviewFonts={textPreviewFonts} onSetPreviewFont={setPreviewFont}
+                />
+              </div>
+              <div className="p-3 border-t border-gray-200 dark:border-gray-800">
+                <Button onClick={apply} disabled={processing || busy} className="w-full h-11 rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm shadow-sm flex items-center justify-center gap-2">
+                  {processing ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <>{actionLabel || "Save changes"}<ArrowRight className="h-4 w-4" /></>}
+                </Button>
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
       </div>
 
       {signatureOpen && (
-        <SignatureModal
-          tab={signatureTab}
-          onTabChange={setSignatureTab}
-          typedSignature={typedSignature}
-          onTypedChange={setTypedSignature}
-          canvasRef={sigCanvasRef}
-          drawingRef={sigDrawingRef}
-          onClear={clearSignaturePad}
-          onCancel={() => {
-            setSignatureOpen(false);
-            setActiveTool("select");
-          }}
-          onInsert={insertSignature}
-          saveAfterInsert={saveSigAfterInsert}
-          onSaveAfterInsertChange={setSaveSigAfterInsert}
-          savedSignatures={savedSignatures}
-          onUseSaved={(src: string) => {
-            placeSignature(src);
-            setSignatureOpen(false);
-          }}
-          onDeleteSaved={(id: string) => {
-            deleteSavedSignature(id);
-            setSavedSignatures(getSavedSignatures());
-          }}
+        <SignatureModal savedSignatures={savedSignatures} onInsert={handleSignatureInsert}
+          onCancel={() => { setSignatureOpen(false); setActiveTool("select"); }}
+          onDeleteSaved={(id: string) => { deleteSavedSignature(id); setSavedSignatures(getSavedSignatures()); }}
         />
       )}
     </div>
   );
 }
 
-function ZoomOutIcon() {
+function ToolBtn({ icon, label, active, disabled, onClick }: { icon: React.ReactNode; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function ToolBtn({
-  icon,
-  label,
-  active,
-  disabled,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: (ev?: ReactMouseEvent) => void;
-}) {
-  return (
-    <button
-      onClick={(ev) => onClick(ev)}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      className={cn(
-        "flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#DC2626]",
-        active
-          ? "bg-red-50 text-[#DC2626] dark:bg-red-900/30 dark:text-red-300"
-          : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800",
-        disabled && "opacity-35 pointer-events-none"
-      )}
-    >
+    <button onClick={onClick} disabled={disabled} title={label} aria-label={label} aria-pressed={active}
+      className={cn("flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 transition-colors", active ? "bg-red-50 text-[#DC2626] dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800", disabled && "opacity-35 pointer-events-none")}>
       <span className="w-4 h-4 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4">{icon}</span>
       <span className="hidden md:inline">{label}</span>
     </button>
   );
 }
+function Divider() { return <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />; }
 
-function Divider() {
-  return <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />;
-}
-
+/* =========================================================  PREVIEW CANVAS  ========================================================= */
 function PreviewCanvas(props: {
-  pdf: PdfDoc | null;
-  pages: EditorPage[];
-  zoom: number;
-  fitMode: "width" | "page" | "custom";
-  current: number;
-  onCurrentChange: (n: number) => void;
-  phase: Phase;
-  onToggleSelect: (i: number) => void;
-  selectionMode: boolean;
-  elements: AnyElement[];
-  activeTool: Tool;
-  selectedIds: Set<string>;
-  onSetSelectedIds: (ids: Set<string>) => void;
-  onAddElement: (el: AnyElement) => void;
-  onAddElementKeepTool: (el: AnyElement) => void;
+  pdf: PdfDoc | null; pages: EditorPage[]; zoom: number; fitMode: "width" | "page" | "custom";
+  current: number; onCurrentChange: (n: number) => void; phase: Phase;
+  onToggleSelect: (i: number) => void; selectionMode: boolean; elements: AnyElement[];
+  activeTool: Tool; selectedIds: Set<string>; onSetSelectedIds: (ids: Set<string>) => void;
+  onAddElement: (el: AnyElement) => void; onAddElementKeepTool: (el: AnyElement) => void;
   onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
   onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
   onDuplicateElements: (ids: Set<string>) => void;
-  onDeleteElements: (ids: Set<string>) => void;
-  panStateRef: React.MutableRefObject<{
-    startX: number;
-    startY: number;
-    scrollLeft: number;
-    scrollTop: number;
-    el: HTMLElement;
-  } | null>;
-  textPreviewFonts: Record<string, string>;
-  isMobile: boolean;
-  brushColor: string;
-  highlightColor: string;
-  brushSize: number;
-  selectedEmoji: string;
+  onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
+  panStateRef: React.MutableRefObject<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; el: HTMLElement } | null>;
+  textPreviewFonts: Record<string, string>; drawStroke: { color: string; width: number }; eraserSize: number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
+  const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
   const [visible, setVisible] = useState<Set<number>>(new Set([0]));
-
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setContainerSize({ w: el.clientWidth, h: el.clientHeight }));
-    ro.observe(el);
-    setContainerSize({ w: el.clientWidth, h: el.clientHeight });
-    return () => ro.disconnect();
-  }, []);
-
-  const scale = useMemo(() => {
-    if (!props.pdf) return 1.5;
-    if (props.fitMode === "custom") return 1.5 * props.zoom;
-    return props.fitMode === "width" ? 1.5 : 1.2;
-  }, [props.pdf, props.fitMode, props.zoom]);
-
+  useLayoutEffect(() => { const el = containerRef.current; if (!el) return; const ro = new ResizeObserver(() => setContainerSize({ w: el.clientWidth, h: el.clientHeight })); ro.observe(el); setContainerSize({ w: el.clientWidth, h: el.clientHeight }); return () => ro.disconnect(); }, []);
+  const scale = useMemo(() => { if (!props.pdf) return 1.5; if (props.fitMode === "custom") return 1.5 * props.zoom; return props.fitMode === "width" ? 1.5 : 1.2; }, [props.pdf, props.fitMode, props.zoom]);
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+    const el = containerRef.current; if (!el) return;
     const items = Array.from(el.querySelectorAll<HTMLElement>("[data-page-index]"));
-    const io = new IntersectionObserver(
-      (entries) => {
-        setVisible((prev) => {
-          const next = new Set(prev);
-          entries.forEach((en) => {
-            const idx = parseInt(en.target.getAttribute("data-page-index") || "-1", 10);
-            if (en.isIntersecting) next.add(idx);
-            else next.delete(idx);
-          });
-          return next;
-        });
-        const topEntry = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-        if (topEntry) {
-          const idx = parseInt(topEntry.target.getAttribute("data-page-index") || "-1", 10);
-          if (idx >= 0) props.onCurrentChange(idx);
-        }
-      },
-      { root: el, rootMargin: "50% 0px", threshold: 0 }
-    );
-    items.forEach((it) => io.observe(it));
-    return () => io.disconnect();
+    const io = new IntersectionObserver((entries) => {
+      setVisible((prev) => { const next = new Set(prev); entries.forEach((en) => { const idx = parseInt((en.target as Element).getAttribute("data-page-index") || "-1", 10); if (en.isIntersecting) next.add(idx); else next.delete(idx); }); return next; });
+      const top = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (top) { const idx = parseInt((top.target as Element).getAttribute("data-page-index") || "-1", 10); if (idx >= 0) props.onCurrentChange(idx); }
+    }, { root: el, rootMargin: "50% 0px", threshold: 0 });
+    items.forEach((it) => io.observe(it)); return () => io.disconnect();
   }, [props.pages.length, props.onCurrentChange]);
 
   function onContainerPointerDown(e: ReactPointerEvent) {
     if (props.activeTool !== "hand") return;
-    const el = containerRef.current;
-    if (!el) return;
-    props.panStateRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      scrollLeft: el.scrollLeft,
-      scrollTop: el.scrollTop,
-      el,
-    };
-    function onMove(ev: PointerEvent) {
-      const st = props.panStateRef.current;
-      if (!st) return;
-      st.el.scrollLeft = st.scrollLeft - (ev.clientX - st.startX);
-      st.el.scrollTop = st.scrollTop - (ev.clientY - st.startY);
-    }
-    function onUp() {
-      props.panStateRef.current = null;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    const el = containerRef.current; if (!el) return;
+    props.panStateRef.current = { startX: e.clientX, startY: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop, el };
+    const onMove = (ev: PointerEvent) => { const st = props.panStateRef.current; if (!st) return; st.el.scrollLeft = st.scrollLeft - (ev.clientX - st.startX); st.el.scrollTop = st.scrollTop - (ev.clientY - st.startY); };
+    const onUp = () => { props.panStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
   return (
-    <div
-      ref={containerRef}
-      onPointerDown={onContainerPointerDown}
-      className="w-full h-full overflow-auto flex flex-col items-center py-6 px-2 sm:px-4"
-      style={{ 
-        cursor: props.activeTool === "hand" ? "grab" : undefined,
-        touchAction: props.activeTool === "hand" ? "none" : "auto", 
-      }}
-    >
+    <div ref={containerRef} onPointerDown={onContainerPointerDown} className="w-full h-full overflow-auto flex flex-col items-center py-6 px-2 sm:px-4" style={{ cursor: props.activeTool === "hand" ? "grab" : undefined }}>
       <div className="flex flex-col items-center gap-8 pb-32">
         {props.pages.map((p, i) => (
-          <PagePane
-            key={p.id}
-            index={i}
-            page={p}
-            pdf={props.pdf!}
-            visible={visible.has(i)}
-            containerWidth={containerSize.w}
-            containerHeight={containerSize.h}
-            fitMode={props.fitMode}
-            zoom={props.zoom}
-            baseScale={scale}
-            active={props.current === i}
-            selectionMode={props.selectionMode}
-            onToggleSelect={() => props.onToggleSelect(i)}
-            elements={props.elements.filter((e) => e.pageId === p.id)}
-            activeTool={props.activeTool}
-            selectedIds={props.selectedIds}
-            onSetSelectedIds={props.onSetSelectedIds}
-            onAddElement={props.onAddElement}
-            onAddElementKeepTool={props.onAddElementKeepTool}
-            onUpdateElement={props.onUpdateElement}
-            onUpdateElements={props.onUpdateElements}
-            onDuplicateElements={props.onDuplicateElements}
-            onDeleteElements={props.onDeleteElements}
-            textPreviewFonts={props.textPreviewFonts}
-            isMobile={props.isMobile}
-            brushColor={props.brushColor}
-            highlightColor={props.highlightColor}
-            brushSize={props.brushSize}
-            selectedEmoji={props.selectedEmoji}
+          <PagePane key={p.id} index={i} page={p} pdf={props.pdf!} visible={visible.has(i)}
+            containerWidth={containerSize.w} containerHeight={containerSize.h} fitMode={props.fitMode}
+            zoom={props.zoom} baseScale={scale} active={props.current === i}
+            selectionMode={props.selectionMode} onToggleSelect={() => props.onToggleSelect(i)}
+            elements={props.elements.filter((e) => e.pageId === p.id)} activeTool={props.activeTool}
+            selectedIds={props.selectedIds} onSetSelectedIds={props.onSetSelectedIds}
+            onAddElement={props.onAddElement} onAddElementKeepTool={props.onAddElementKeepTool}
+            onUpdateElement={props.onUpdateElement} onUpdateElements={props.onUpdateElements}
+            onDuplicateElements={props.onDuplicateElements} onReplaceElements={props.onReplaceElements}
+            textPreviewFonts={props.textPreviewFonts} drawStroke={props.drawStroke} eraserSize={props.eraserSize}
           />
         ))}
       </div>
@@ -1857,73 +723,37 @@ function PreviewCanvas(props: {
 }
 
 function PagePane(props: {
-  index: number;
-  page: EditorPage;
-  pdf: PdfDoc;
-  visible: boolean;
-  containerWidth: number;
-  containerHeight: number;
-  fitMode: "width" | "page" | "custom";
-  zoom: number;
-  baseScale: number;
-  active: boolean;
-  selectionMode: boolean;
-  onToggleSelect: () => void;
-  elements: AnyElement[];
-  activeTool: Tool;
-  selectedIds: Set<string>;
-  onSetSelectedIds: (ids: Set<string>) => void;
-  onAddElement: (el: AnyElement) => void;
-  onAddElementKeepTool: (el: AnyElement) => void;
+  index: number; page: EditorPage; pdf: PdfDoc; visible: boolean;
+  containerWidth: number; containerHeight: number; fitMode: "width" | "page" | "custom";
+  zoom: number; baseScale: number; active: boolean; selectionMode: boolean;
+  onToggleSelect: () => void; elements: AnyElement[]; activeTool: Tool;
+  selectedIds: Set<string>; onSetSelectedIds: (ids: Set<string>) => void;
+  onAddElement: (el: AnyElement) => void; onAddElementKeepTool: (el: AnyElement) => void;
   onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
   onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
   onDuplicateElements: (ids: Set<string>) => void;
-  onDeleteElements: (ids: Set<string>) => void;
-  textPreviewFonts: Record<string, string>;
-  isMobile: boolean;
-  brushColor: string;
-  highlightColor: string;
-  brushSize: number;
-  selectedEmoji: string;
+  onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
+  textPreviewFonts: Record<string, string>; drawStroke: { color: string; width: number }; eraserSize: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [rendered, setRendered] = useState(false);
-  const paneRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     let cancelled = false;
-    if (props.page.isBlank) {
-      setDims({ w: 595, h: 842 });
-      setRendered(true);
-      return;
-    }
-    (async () => {
-      try {
-        const p = await props.pdf.getPage(props.page.originalIndex + 1);
-        const vp = p.getViewport({ scale: 1, rotation: props.page.rotation });
-        if (!cancelled) setDims({ w: vp.width, h: vp.height });
-      } catch {
-        /* noop */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    if (props.page.isBlank) { setDims({ w: 595, h: 842 }); setRendered(true); return; }
+    (async () => { try { const p = await props.pdf.getPage(props.page.originalIndex + 1); const vp = p.getViewport({ scale: 1, rotation: props.page.rotation }); if (!cancelled) setDims({ w: vp.width, h: vp.height }); } catch { /**/ } })();
+    return () => { cancelled = true; };
   }, [props.pdf, props.page.originalIndex, props.page.rotation, props.page.isBlank]);
 
   const scale = useMemo(() => {
     if (!dims) return 1;
     if (props.fitMode === "custom") return props.baseScale;
-    const padding = 16;
-    if (props.fitMode === "width") return Math.max(320, props.containerWidth - padding) / dims.w;
-    const targetW = Math.max(320, props.containerWidth - padding);
-    const targetH = Math.max(320, props.containerHeight - padding);
-    return Math.min(targetW / dims.w, targetH / dims.h);
+    const pad = 16;
+    if (props.fitMode === "width") return Math.max(320, props.containerWidth - pad) / dims.w;
+    return Math.min(Math.max(320, props.containerWidth - pad) / dims.w, Math.max(320, props.containerHeight - pad) / dims.h);
   }, [dims, props.fitMode, props.baseScale, props.containerWidth, props.containerHeight]);
 
-  const displayW = dims ? dims.w * scale : 600;
-  const displayH = dims ? dims.h * scale : 800;
+  const displayW = dims ? dims.w * scale : 600, displayH = dims ? dims.h * scale : 800;
 
   useEffect(() => {
     if (!props.visible || !dims || props.page.isBlank) return;
@@ -1932,1289 +762,683 @@ function PagePane(props: {
       try {
         const page = await props.pdf.getPage(props.page.originalIndex + 1);
         const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-        const renderScale = Math.max(scale, 1) * dpr;
-        const viewport = page.getViewport({ scale: renderScale, rotation: props.page.rotation });
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
-        canvas.style.width = `${Math.ceil(displayW)}px`;
-        canvas.style.height = `${Math.ceil(displayH)}px`;
-        const ctx = canvas.getContext("2d", { alpha: false });
-        if (!ctx) return;
-        if (cancelled) return;
-        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        const vp = page.getViewport({ scale: Math.max(scale, 1) * dpr, rotation: props.page.rotation });
+        const canvas = canvasRef.current; if (!canvas) return;
+        canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+        canvas.style.width = `${Math.ceil(displayW)}px`; canvas.style.height = `${Math.ceil(displayH)}px`;
+        const ctx = canvas.getContext("2d", { alpha: false }); if (!ctx || cancelled) return;
+        await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
         if (!cancelled) setRendered(true);
-      } catch {
-        /* noop */
-      }
+      } catch { /**/ }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    props.visible,
-    dims,
-    scale,
-    props.pdf,
-    props.page.originalIndex,
-    props.page.rotation,
-    displayW,
-    displayH,
-    props.page.isBlank,
-  ]);
-
-  const canAnnotate = props.page.rotation === 0;
+    return () => { cancelled = true; };
+  }, [props.visible, dims, scale, props.pdf, props.page.originalIndex, props.page.rotation, displayW, displayH, props.page.isBlank]);
 
   return (
-    <div
-      ref={paneRef}
-      id={`pdf-page-${props.index}`}
-      data-page-index={props.index}
-      className={cn(
-        "group relative overflow-hidden bg-white shadow-[0_1px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_1px_10px_rgba(0,0,0,0.5)] mb-8 border border-gray-200 dark:border-gray-800 transition-shadow",
-        props.selectionMode && "cursor-pointer"
-      )}
-      style={{ width: displayW, height: displayH }}
-      onClick={props.selectionMode ? props.onToggleSelect : undefined}
-    >
+    <div id={`pdf-page-${props.index}`} data-page-index={props.index}
+      className={cn("group relative overflow-hidden bg-white shadow-[0_1px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_1px_10px_rgba(0,0,0,0.5)] mb-8 border border-gray-200 dark:border-gray-800", props.selectionMode && "cursor-pointer")}
+      style={{ width: displayW, height: displayH }} onClick={props.selectionMode ? props.onToggleSelect : undefined}>
       <canvas ref={canvasRef} className="block h-full w-full bg-white" />
-      {!rendered && !props.page.isBlank && (
-        <div className="absolute inset-0 grid animate-pulse place-items-center bg-[#F8F9FA] text-xs text-gray-400">
-          Rendering page…
-        </div>
-      )}
-      {canAnnotate && dims && (
-        <AnnotationLayer
-          pageId={props.page.id}
-          scale={scale}
-          elements={props.elements}
-          activeTool={props.activeTool}
-          selectedIds={props.selectedIds}
-          onSetSelectedIds={props.onSetSelectedIds}
-          onAddElement={props.onAddElement}
-          onAddElementKeepTool={props.onAddElementKeepTool}
-          onUpdateElement={props.onUpdateElement}
-          onUpdateElements={props.onUpdateElements}
-          onDuplicateElements={props.onDuplicateElements}
-          onDeleteElements={props.onDeleteElements}
-          interactive={props.activeTool !== "hand"}
-          textPreviewFonts={props.textPreviewFonts}
-          isMobile={props.isMobile}
-          brushColor={props.brushColor}
-          highlightColor={props.highlightColor}
-          brushSize={props.brushSize}
-          selectedEmoji={props.selectedEmoji}
+      {!rendered && !props.page.isBlank && <div className="absolute inset-0 grid animate-pulse place-items-center bg-gray-50 text-xs text-gray-400">Rendering…</div>}
+      {props.page.rotation === 0 && dims && (
+        <AnnotationLayer pageId={props.page.id} scale={scale} elements={props.elements} activeTool={props.activeTool}
+          selectedIds={props.selectedIds} onSetSelectedIds={props.onSetSelectedIds}
+          onAddElement={props.onAddElement} onAddElementKeepTool={props.onAddElementKeepTool}
+          onUpdateElement={props.onUpdateElement} onUpdateElements={props.onUpdateElements}
+          onDuplicateElements={props.onDuplicateElements} onReplaceElements={props.onReplaceElements}
+          interactive={props.activeTool !== "hand"} textPreviewFonts={props.textPreviewFonts}
+          drawStroke={props.drawStroke} eraserSize={props.eraserSize}
         />
       )}
     </div>
   );
 }
 
-function elementBounds(el: AnyElement) {
-  return { x1: el.x, y1: el.y, x2: el.x + el.width, y2: el.y + el.height };
-}
-function rectsIntersect(
-  a: { x1: number; y1: number; x2: number; y2: number },
-  b: { x1: number; y1: number; x2: number; y2: number }
-) {
-  return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
-}
-
+/* =========================================================  ANNOTATION LAYER  ========================================================= */
 function AnnotationLayer(props: {
-  pageId: string;
-  scale: number;
-  elements: AnyElement[];
-  activeTool: Tool;
-  selectedIds: Set<string>;
-  onSetSelectedIds: (ids: Set<string>) => void;
-  onAddElement: (el: AnyElement) => void;
-  onAddElementKeepTool: (el: AnyElement) => void;
+  pageId: string; scale: number; elements: AnyElement[]; activeTool: Tool;
+  selectedIds: Set<string>; onSetSelectedIds: (ids: Set<string>) => void;
+  onAddElement: (el: AnyElement) => void; onAddElementKeepTool: (el: AnyElement) => void;
   onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
   onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
   onDuplicateElements: (ids: Set<string>) => void;
-  onDeleteElements: (ids: Set<string>) => void;
-  interactive: boolean;
-  textPreviewFonts: Record<string, string>;
-  isMobile: boolean;
-  brushColor: string;
-  highlightColor: string;
-  brushSize: number;
-  selectedEmoji: string;
+  onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
+  interactive: boolean; textPreviewFonts: Record<string, string>;
+  drawStroke: { color: string; width: number }; eraserSize: number;
 }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [drawPoints, setDrawPoints] = useState<{ x: number; y: number }[] | null>(null);
-  // Keep the authoritative in-progress stroke outside React state. Pointer
-  // events can outpace rendering, especially with a pen, and state alone can
-  // otherwise lose the last segment when pointerup arrives.
-  const drawStateRef = useRef<{ pointerId: number; points: { x: number; y: number }[] } | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const dragStateRef = useRef<{ startPt?: { x: number; y: number }, isErasing?: boolean } | null>(null);
+  const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
+  const dragStateRef = useRef<{ startPt: { x: number; y: number } } | null>(null);
   const moveStateRef = useRef<{ ids: string[]; offsets: Record<string, { x: number; y: number }> } | null>(null);
   const resizeStateRef = useRef<{ id: string; startW: number; startH: number } | null>(null);
-  const rotateStateRef = useRef<{
-    id: string;
-    centerX: number;
-    centerY: number;
-    startAngle: number;
-    startRotation: number;
-  } | null>(null);
+  const rotateStateRef = useRef<{ id: string; centerX: number; centerY: number; startAngle: number; startRotation: number } | null>(null);
 
-  const toPt = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = layerRef.current!.getBoundingClientRect();
-      return { x: (clientX - rect.left) / props.scale, y: (clientY - rect.top) / props.scale };
-    },
-    [props.scale]
-  );
+  const toPt = useCallback((clientX: number, clientY: number) => {
+    const rect = layerRef.current!.getBoundingClientRect();
+    return { x: (clientX - rect.left) / props.scale, y: (clientY - rect.top) / props.scale };
+  }, [props.scale]);
 
-  const eraseAt = (x: number, y: number) => {
-    const r = 15 / props.scale; 
-    const hits = new Set<string>();
-    props.elements.forEach(el => {
-      if (el.type === 'draw' || el.type === 'squiggly') {
-        const d = el as DrawElement;
-        const hasHit = (d.points || []).some((p) => Math.hypot((d.x + p.x) - x, (d.y + p.y) - y) < r);
-        if (hasHit) hits.add(el.id);
-      } else {
-        if (x >= el.x - r && x <= el.x + el.width + r && y >= el.y - r && y <= el.y + el.height + r) {
-          hits.add(el.id);
-        }
-      }
-    });
-    if (hits.size > 0) props.onDeleteElements(hits);
-  };
-
-  const nonCreationTools: Tool[] = ["select", "hand", "image", "signature"];
+  const nonCreationTools: Tool[] = ["select", "hand", "image", "signature", "eraser"];
   const isCreationTool = props.interactive && !nonCreationTools.includes(props.activeTool);
+  const isShapeTool = props.activeTool.startsWith("shape-");
   const isFieldTool = props.activeTool.startsWith("field-");
-
-  function makeFieldDefault(): AnyElement | null {
-    const base = { id: makeId(props.activeTool), pageId: props.pageId, opacity: 1, rotation: 0 } as const;
-    if (props.activeTool === "field-text")
-      return {
-        ...base,
-        type: "field-text",
-        width: 180,
-        height: 26,
-        name: "text_field",
-        value: "",
-        placeholder: "Enter text",
-        required: false,
-      } as FieldTextElement;
-    if (props.activeTool === "field-checkbox")
-      return {
-        ...base,
-        type: "field-checkbox",
-        width: 18,
-        height: 18,
-        name: "checkbox",
-        checked: false,
-        required: false,
-      } as FieldCheckboxElement;
-    if (props.activeTool === "field-radio")
-      return {
-        ...base,
-        type: "field-radio",
-        width: 18,
-        height: 18,
-        groupName: "radio_group",
-        value: "option_1",
-        checked: false,
-        required: false,
-      } as FieldRadioElement;
-    if (props.activeTool === "field-dropdown")
-      return {
-        ...base,
-        type: "field-dropdown",
-        width: 160,
-        height: 26,
-        name: "dropdown",
-        options: ["Option 1", "Option 2"],
-        value: "Option 1",
-        required: false,
-      } as FieldDropdownElement;
-    return null;
-  }
 
   function onLayerPointerDown(e: ReactPointerEvent) {
     if (!props.interactive) return;
 
-    const pt = toPt(e.clientX, e.clientY);
-
+    // ERASER TOOL
     if (props.activeTool === "eraser") {
-      dragStateRef.current = { isErasing: true };
-      eraseAt(pt.x, pt.y);
-      function onMove(ev: PointerEvent) {
-        if (dragStateRef.current?.isErasing) {
-          const p = toPt(ev.clientX, ev.clientY);
-          eraseAt(p.x, p.y);
-        }
-      }
-      function onUp() {
-        dragStateRef.current = null;
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
-      }
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-      window.addEventListener("pointercancel", onUp);
+      e.preventDefault();
+      const pt = toPt(e.clientX, e.clientY);
+      setEraserPos(pt);
+      const drawEls = props.elements.filter((el) => el.type === "draw") as DrawElement[];
+      const { toRemove, toAdd } = eraseFromDrawElements(pt, props.eraserSize, drawEls);
+      if (toRemove.length > 0) props.onReplaceElements(toRemove, toAdd);
+      const onMove = (ev: PointerEvent) => {
+        const p = toPt(ev.clientX, ev.clientY); setEraserPos(p);
+        // Note: props.elements is captured at pointerdown; for real-time erasure use ref pattern
+        const curr = props.elements.filter((el) => el.type === "draw") as DrawElement[];
+        const res = eraseFromDrawElements(p, props.eraserSize, curr);
+        if (res.toRemove.length > 0) props.onReplaceElements(res.toRemove, res.toAdd);
+      };
+      const onUp = () => { setEraserPos(null); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+      window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
       return;
     }
 
+    // SELECT / MARQUEE
     if (!isCreationTool) {
       if (e.target === layerRef.current) {
         if (e.shiftKey || e.metaKey || e.ctrlKey) return;
         props.onSetSelectedIds(new Set());
         const start = toPt(e.clientX, e.clientY);
         setMarquee({ x: start.x, y: start.y, w: 0, h: 0 });
-        function onMove(ev: PointerEvent) {
+        const onMove = (ev: PointerEvent) => { const p = toPt(ev.clientX, ev.clientY); setMarquee({ x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) }); };
+        const onUp = (ev: PointerEvent) => {
+          window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp);
           const p = toPt(ev.clientX, ev.clientY);
-          setMarquee({
-            x: Math.min(start.x, p.x),
-            y: Math.min(start.y, p.y),
-            w: Math.abs(p.x - start.x),
-            h: Math.abs(p.y - start.y),
-          });
-        }
-        function onUp(ev: PointerEvent) {
-          window.removeEventListener("pointermove", onMove);
-          window.removeEventListener("pointerup", onUp);
-          window.removeEventListener("pointercancel", onUp);
-          const p = toPt(ev.clientX, ev.clientY);
-          const rect = {
-            x1: Math.min(start.x, p.x),
-            y1: Math.min(start.y, p.y),
-            x2: Math.max(start.x, p.x),
-            y2: Math.max(start.y, p.y),
-          };
-          if (Math.abs(rect.x2 - rect.x1) > 3 || Math.abs(rect.y2 - rect.y1) > 3) {
-            const hit = props.elements
-              .filter((el: AnyElement) => rectsIntersect(rect, elementBounds(el)))
-              .map((el: AnyElement) => el.id);
-            props.onSetSelectedIds(new Set(hit));
-          }
+          const r = { x1: Math.min(start.x, p.x), y1: Math.min(start.y, p.y), x2: Math.max(start.x, p.x), y2: Math.max(start.y, p.y) };
+          if (Math.abs(r.x2 - r.x1) > 3 || Math.abs(r.y2 - r.y1) > 3) props.onSetSelectedIds(new Set(props.elements.filter((el) => { const b = { x1: el.x, y1: el.y, x2: el.x + el.width, y2: el.y + el.height }; return r.x1 < b.x2 && r.x2 > b.x1 && r.y1 < b.y2 && r.y2 > b.y1; }).map((el) => el.id)));
           setMarquee(null);
-        }
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", onUp);
-        window.addEventListener("pointercancel", onUp);
+        };
+        window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
       }
       return;
     }
 
-    if (props.activeTool === "text") {
-      const el: TextElement = {
-        id: makeId("txt"),
-        pageId: props.pageId,
-        type: "text",
-        x: pt.x,
-        y: pt.y,
-        width: 180,
-        height: 28,
-        opacity: 1,
-        rotation: 0,
-        text: "Click to edit text",
-        font: "Helvetica",
-        fontSize: Math.max(14, props.brushSize * 4),
-        bold: false,
-        italic: false,
-        underline: false,
-        color: props.brushColor,
-        align: "left",
-        letterSpacing: 0,
-        lineSpacing: 1.25,
-      };
-      props.onAddElement(el);
-      return;
-    }
-    
-    if (props.activeTool === "emoji") {
-      props.onAddElement({
-        id: makeId("emoji"),
-        pageId: props.pageId,
-        type: "text",
-        x: pt.x,
-        y: pt.y,
-        width: 48,
-        height: 48,
-        opacity: 1,
-        rotation: 0,
-        text: props.selectedEmoji || "🙂",
-        font: "Helvetica",
-        fontSize: 32,
-        bold: false,
-        italic: false,
-        underline: false,
-        color: "#111827",
-        align: "left",
-        letterSpacing: 0,
-        lineSpacing: 1,
-      } as TextElement);
-      return;
-    }
+    const pt = toPt(e.clientX, e.clientY);
 
-    if (props.activeTool === "sticky") {
-      props.onAddElement({
-        id: makeId("sticky"),
-        pageId: props.pageId,
-        type: "sticky",
-        x: pt.x,
-        y: pt.y,
-        width: 140,
-        height: 100,
-        opacity: 1,
-        rotation: 0,
-        color: "#FEF08A",
-        note: "",
-      } as StickyElement);
-      return;
-    }
+    // Single-click tools
+    if (props.activeTool === "text") { props.onAddElement({ id: makeId("txt"), pageId: props.pageId, type: "text", x: pt.x, y: pt.y, width: 180, height: 28, opacity: 1, rotation: 0, text: "Click to edit text", font: "Helvetica", fontSize: 14, bold: false, italic: false, underline: false, color: "#111827", align: "left", letterSpacing: 0, lineSpacing: 1.25 } as TextElement); return; }
+    if (props.activeTool === "sticky") { props.onAddElement({ id: makeId("sticky"), pageId: props.pageId, type: "sticky", x: pt.x, y: pt.y, width: 140, height: 100, opacity: 1, rotation: 0, color: "#FEF08A", note: "" } as StickyElement); return; }
     if (isFieldTool) {
-      const el = makeFieldDefault();
-      if (el) props.onAddElement({ ...el, x: pt.x, y: pt.y } as AnyElement);
-      return;
+      const base = { id: makeId(props.activeTool), pageId: props.pageId, opacity: 1, rotation: 0, x: pt.x, y: pt.y } as const;
+      let el: AnyElement | null = null;
+      if (props.activeTool === "field-text") el = { ...base, type: "field-text", width: 180, height: 26, name: "text_field", value: "", placeholder: "Enter text", required: false } as FieldTextElement;
+      else if (props.activeTool === "field-checkbox") el = { ...base, type: "field-checkbox", width: 18, height: 18, name: "checkbox", checked: false, required: false } as FieldCheckboxElement;
+      else if (props.activeTool === "field-radio") el = { ...base, type: "field-radio", width: 18, height: 18, groupName: "radio_group", value: "option_1", checked: false, required: false } as FieldRadioElement;
+      else if (props.activeTool === "field-dropdown") el = { ...base, type: "field-dropdown", width: 160, height: 26, name: "dropdown", options: ["Option 1", "Option 2"], value: "Option 1", required: false } as FieldDropdownElement;
+      if (el) props.onAddElement(el); return;
     }
 
+    // Drag-based tools
     dragStateRef.current = { startPt: pt };
-    layerRef.current?.setPointerCapture(e.pointerId);
-    if (props.activeTool === "draw") {
-      drawStateRef.current = { pointerId: e.pointerId, points: [pt] };
-      setDrawPoints([pt]);
-    }
+    if (props.activeTool === "draw") setDrawPoints([pt]);
     else setDraft({ x: pt.x, y: pt.y, w: 0, h: 0 });
 
-    function onMove(ev: PointerEvent) {
-      if (ev.pointerId !== e.pointerId) return;
+    const onMove = (ev: PointerEvent) => {
       const p = toPt(ev.clientX, ev.clientY);
-      if (props.activeTool === "draw") {
-        const stroke = drawStateRef.current;
-        if (!stroke || stroke.pointerId !== ev.pointerId) return;
-        const previous = stroke.points[stroke.points.length - 1];
-        // Discard duplicate pointer samples without changing the path shape.
-        if (previous && Math.hypot(previous.x - p.x, previous.y - p.y) < 0.15) return;
-        stroke.points.push(p);
-        // Native window pointer events can be batched by React, which delays
-        // paint until pointerup. Flush this lightweight preview update so ink
-        // follows the pointer while drawing.
-        flushSync(() => setDrawPoints([...stroke.points]));
-      } else {
-        const start = dragStateRef.current!.startPt;
-        if (start) {
-          setDraft({
-            x: Math.min(start.x, p.x),
-            y: Math.min(start.y, p.y),
-            w: Math.abs(p.x - start.x),
-            h: Math.abs(p.y - start.y),
-          });
-        }
-      }
-    }
-    function onUp(ev: PointerEvent) {
-      if (ev.pointerId !== e.pointerId) return;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      if (layerRef.current?.hasPointerCapture(e.pointerId)) layerRef.current.releasePointerCapture(e.pointerId);
+      if (props.activeTool === "draw") setDrawPoints((pts) => pts ? [...pts, p] : [p]);
+      else { const s = dragStateRef.current!.startPt; setDraft({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) }); }
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp);
       const p = toPt(ev.clientX, ev.clientY);
       const start = dragStateRef.current?.startPt ?? p;
       dragStateRef.current = null;
 
       if (props.activeTool === "draw") {
-        const points = drawStateRef.current?.pointerId === e.pointerId ? drawStateRef.current.points : [];
-        drawStateRef.current = null;
-        setDrawPoints(null);
-        if (points.length > 1) {
-            const xs = points.map((pp) => pp.x);
-            const ys = points.map((pp) => pp.y);
-            const minX = Math.min(...xs),
-              minY = Math.min(...ys),
-              maxX = Math.max(...xs),
-              maxY = Math.max(...ys);
-            props.onAddElementKeepTool({
-              id: makeId("draw"),
-              pageId: props.pageId,
-              type: "draw",
-              x: minX,
-              y: minY,
-              width: Math.max(1, maxX - minX),
-              height: Math.max(1, maxY - minY),
-              opacity: 1,
-              rotation: 0,
-              stroke: props.brushColor,
-              strokeWidth: props.brushSize,
-              points: points.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })),
-            } as DrawElement);
-        }
+        setDrawPoints((pts) => {
+          if (pts && pts.length > 1) {
+            const xs = pts.map((pp) => pp.x), ys = pts.map((pp) => pp.y);
+            const minX = Math.min(...xs), minY = Math.min(...ys), maxX = Math.max(...xs), maxY = Math.max(...ys);
+            props.onAddElement({ id: makeId("draw"), pageId: props.pageId, type: "draw", x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY), opacity: 1, rotation: 0, stroke: props.drawStroke.color, strokeWidth: props.drawStroke.width, points: pts.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })) } as DrawElement);
+          }
+          return null;
+        });
         return;
       }
 
-      const x = Math.min(start.x, p.x);
-      const y = Math.min(start.y, p.y);
-      const w = Math.max(8, Math.abs(p.x - start.x));
-      const h = Math.max(8, Math.abs(p.y - start.y));
+      const x = Math.min(start.x, p.x), y = Math.min(start.y, p.y);
+      const w = Math.max(8, Math.abs(p.x - start.x)), h = Math.max(8, Math.abs(p.y - start.y));
       setDraft(null);
 
-      if (
-        props.activeTool === "shape-rect" ||
-        props.activeTool === "shape-ellipse" ||
-        props.activeTool === "shape-line"
-      ) {
-        props.onAddElement({
-          id: makeId("shape"),
-          pageId: props.pageId,
-          type:
-            props.activeTool === "shape-rect"
-              ? "rect"
-              : props.activeTool === "shape-ellipse"
-              ? "ellipse"
-              : "line",
-          x,
-          y,
-          width: w,
-          height: h,
-          opacity: 1,
-          rotation: 0,
-          stroke: props.brushColor,
-          strokeWidth: props.brushSize,
-          fill: null,
-        } as ShapeElement);
-      } else if (
-        props.activeTool === "highlight" ||
-        props.activeTool === "underline" ||
-        props.activeTool === "strikeout" ||
-        props.activeTool === "squiggly"
-      ) {
-        props.onAddElementKeepTool({
-          id: makeId("markup"),
-          pageId: props.pageId,
-          type: props.activeTool,
-          x,
-          y,
-          width: w,
-          height: h,
-          opacity: props.activeTool === "highlight" ? 0.35 : 1,
-          rotation: 0,
-          color: props.activeTool === "highlight" ? props.highlightColor : "#FDE047",
-        } as HighlightElement);
+      if (isShapeTool) {
+        const flipDiag = (start.x < p.x) !== (start.y < p.y);
+        props.onAddElement({ id: makeId("shape"), pageId: props.pageId, type: props.activeTool.replace("shape-", ""), x, y, width: w, height: h, opacity: 1, rotation: 0, stroke: "#DC2626", strokeWidth: 2, fill: null, flipDiag } as unknown as ShapeElement);
+      } else if (["highlight","underline","strikeout","squiggly"].includes(props.activeTool)) {
+        props.onAddElement({ id: makeId("markup"), pageId: props.pageId, type: props.activeTool, x, y, width: w, height: h, opacity: props.activeTool === "highlight" ? 0.35 : 1, rotation: 0, color: "#FDE047" } as HighlightElement);
       } else if (props.activeTool === "whiteout") {
-        props.onAddElement({
-          id: makeId("wo"),
-          pageId: props.pageId,
-          type: "whiteout",
-          x,
-          y,
-          width: w,
-          height: h,
-          opacity: 1,
-          rotation: 0,
-          color: "#ffffff",
-        });
+        props.onAddElement({ id: makeId("wo"), pageId: props.pageId, type: "whiteout", x, y, width: w, height: h, opacity: 1, rotation: 0, color: "#ffffff" });
       }
-    }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
   function startMove(e: ReactPointerEvent, el: AnyElement) {
     e.stopPropagation();
     if (!props.interactive || props.activeTool !== "select") return;
     let ids = props.selectedIds;
-    if (e.shiftKey || e.metaKey || e.ctrlKey) {
-      const next = new Set(ids);
-      if (next.has(el.id)) next.delete(el.id);
-      else next.add(el.id);
-      props.onSetSelectedIds(next);
-      ids = next;
-    } else if (!ids.has(el.id)) {
-      ids = new Set([el.id]);
-      props.onSetSelectedIds(ids);
-    }
+    if (e.shiftKey || e.metaKey || e.ctrlKey) { const n = new Set(ids); if (n.has(el.id)) n.delete(el.id); else n.add(el.id); props.onSetSelectedIds(n); ids = n; }
+    else if (!ids.has(el.id)) { ids = new Set([el.id]); props.onSetSelectedIds(ids); }
     if (!ids.has(el.id)) return;
-
-    if (e.altKey) {
-      props.onDuplicateElements(ids);
-      return;
-    }
-
+    if (e.altKey) { props.onDuplicateElements(ids); return; }
     const pt = toPt(e.clientX, e.clientY);
     const offsets: Record<string, { x: number; y: number }> = {};
-    for (const id of ids) {
-      const found = props.elements.find((x: AnyElement) => x.id === id);
-      if (found) offsets[id] = { x: pt.x - found.x, y: pt.y - found.y };
-    }
-    moveStateRef.current = { ids: Array.from(ids) as string[], offsets };
-    function onMove(ev: PointerEvent) {
-      const p = toPt(ev.clientX, ev.clientY);
-      const st = moveStateRef.current;
-      if (!st) return;
-      props.onUpdateElements(new Set(st.ids), (e2: AnyElement) => ({
-        x: p.x - st.offsets[e2.id].x,
-        y: p.y - st.offsets[e2.id].y,
-      }));
-    }
-    function onUp() {
-      moveStateRef.current = null;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    for (const id of ids) { const f = props.elements.find((x) => x.id === id); if (f) offsets[id] = { x: pt.x - f.x, y: pt.y - f.y }; }
+    moveStateRef.current = { ids: Array.from(ids), offsets };
+    const onMove = (ev: PointerEvent) => { const p = toPt(ev.clientX, ev.clientY); const st = moveStateRef.current; if (!st) return; props.onUpdateElements(new Set(st.ids), (e2) => ({ x: p.x - st.offsets[e2.id].x, y: p.y - st.offsets[e2.id].y })); };
+    const onUp = () => { moveStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
   function startResize(e: ReactPointerEvent, el: AnyElement) {
     e.stopPropagation();
     resizeStateRef.current = { id: el.id, startW: el.width, startH: el.height };
-    const startClient = { x: e.clientX, y: e.clientY };
-    function onMove(ev: PointerEvent) {
-      const st = resizeStateRef.current;
-      if (!st) return;
-      const dx = (ev.clientX - startClient.x) / props.scale;
-      const dy = (ev.clientY - startClient.y) / props.scale;
-      props.onUpdateElement(st.id, {
-        width: Math.max(12, st.startW + dx),
-        height: Math.max(12, st.startH + dy),
-      });
-    }
-    function onUp() {
-      resizeStateRef.current = null;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    const sc = { x: e.clientX, y: e.clientY };
+    const onMove = (ev: PointerEvent) => { const st = resizeStateRef.current; if (!st) return; props.onUpdateElement(st.id, { width: Math.max(12, st.startW + (ev.clientX - sc.x) / props.scale), height: Math.max(12, st.startH + (ev.clientY - sc.y) / props.scale) }); };
+    const onUp = () => { resizeStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
   function startRotate(e: ReactPointerEvent, el: AnyElement) {
     e.stopPropagation();
     const rect = layerRef.current!.getBoundingClientRect();
-    const centerX = rect.left + (el.x + el.width / 2) * props.scale;
-    const centerY = rect.top + (el.y + el.height / 2) * props.scale;
-    const startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
-    rotateStateRef.current = {
-      id: el.id,
-      centerX,
-      centerY,
-      startAngle,
-      startRotation: el.rotation,
-    };
-    function onMove(ev: PointerEvent) {
-      const st = rotateStateRef.current;
-      if (!st) return;
-      const angle = Math.atan2(ev.clientY - st.centerY, ev.clientX - st.centerX);
-      const deltaDeg = ((angle - st.startAngle) * 180) / Math.PI;
-      let rotation = Math.round(st.startRotation + deltaDeg);
-      if (ev.shiftKey) rotation = Math.round(rotation / 15) * 15;
-      props.onUpdateElement(st.id, { rotation: ((rotation % 360) + 360) % 360 });
-    }
-    function onUp() {
-      rotateStateRef.current = null;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    const cx = rect.left + (el.x + el.width / 2) * props.scale, cy = rect.top + (el.y + el.height / 2) * props.scale;
+    const sa = Math.atan2(e.clientY - cy, e.clientX - cx);
+    rotateStateRef.current = { id: el.id, centerX: cx, centerY: cy, startAngle: sa, startRotation: el.rotation };
+    const onMove = (ev: PointerEvent) => { const st = rotateStateRef.current; if (!st) return; const a = Math.atan2(ev.clientY - st.centerY, ev.clientX - st.centerX); let rot = Math.round(st.startRotation + (a - st.startAngle) * 180 / Math.PI); if (ev.shiftKey) rot = Math.round(rot / 15) * 15; props.onUpdateElement(st.id, { rotation: ((rot % 360) + 360) % 360 }); };
+    const onUp = () => { rotateStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
-  const handleSize = props.isMobile ? 22 : 10;
-  const rotateHandleTop = props.isMobile ? -30 : -22;
+  const isInteractiveDrawing = props.activeTool === "draw" || props.activeTool === "eraser" || isCreationTool;
 
   return (
-    <div
-      ref={layerRef}
-      className="absolute inset-0"
-      style={{
-        cursor: isCreationTool ? "crosshair" : props.activeTool === "hand" ? undefined : "default",
-        pointerEvents: props.interactive ? "auto" : "none",
-        touchAction: isCreationTool || props.activeTool === "eraser" ? "none" : "auto", 
-      }}
-      onPointerDown={onLayerPointerDown}
-    >
-      {props.elements.map((el: AnyElement) => {
+    <div ref={layerRef} className="absolute inset-0"
+      style={{ cursor: props.activeTool === "eraser" ? "none" : isCreationTool ? "crosshair" : "default", pointerEvents: props.interactive ? "auto" : "none", touchAction: isInteractiveDrawing ? "none" : undefined }}
+      onPointerDown={onLayerPointerDown}>
+
+      {props.elements.map((el) => {
         const selected = props.selectedIds.has(el.id);
-        const canRotateHandle =
-          selected &&
-          props.activeTool === "select" &&
-          ROTATABLE_TYPES.has(el.type) &&
-          props.selectedIds.size === 1;
-        const style: CSSProperties = {
-          position: "absolute",
-          left: el.x * props.scale,
-          top: el.y * props.scale,
-          width: el.width * props.scale,
-          height: el.height * props.scale,
-          opacity: el.opacity,
-          transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
-          transformOrigin: "center center",
-          // Creation tools must receive pointer events from the page layer even
-          // when the pointer is over an existing annotation. Otherwise an
-          // element's move handler intercepts the event (and stops bubbling),
-          // so a new stroke cannot begin inside a circle, rectangle, or image.
-          pointerEvents: props.activeTool === "select" ? "auto" : "none",
-          touchAction: "none",
-        };
+        const canRotate = selected && props.activeTool === "select" && ROTATABLE_TYPES.has(el.type) && props.selectedIds.size === 1;
+        const s = el as ShapeElement & { flipDiag?: boolean };
+        const sw = el.width * props.scale, sh = el.height * props.scale;
+        const style: CSSProperties = { position: "absolute", left: el.x * props.scale, top: el.y * props.scale, width: sw, height: sh, opacity: el.opacity, transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined, transformOrigin: "center center" };
 
         let body: React.ReactNode = null;
         if (el.type === "text") {
           const t = el as TextElement;
-          const isEditable = selected && props.activeTool === "select" && props.selectedIds.size === 1;
-          body = (
-            <div
-              ref={(node) => {
-                if (node && isEditable && t.text === "Click to edit text") {
-                  requestAnimationFrame(() => {
-                    node.focus();
-                    const range = document.createRange();
-                    range.selectNodeContents(node);
-                    const sel = window.getSelection();
-                    sel?.removeAllRanges();
-                    sel?.addRange(range);
-                  });
-                }
-              }}
-              contentEditable={isEditable}
-              suppressContentEditableWarning
-              onBlur={(e2) => props.onUpdateElement(el.id, { text: e2.currentTarget.textContent || "" })}
-              style={{
-                width: "100%",
-                height: "100%",
-                fontFamily: props.textPreviewFonts[el.id]
-                  ? fontFamilyStack(props.textPreviewFonts[el.id])
-                  : t.font === "TimesRoman"
-                  ? "Times New Roman, serif"
-                  : t.font === "Courier"
-                  ? "monospace"
-                  : "Helvetica, Arial, sans-serif",
-                fontSize: t.fontSize * props.scale,
-                fontWeight: t.bold ? 700 : 400,
-                fontStyle: t.italic ? "italic" : "normal",
-                textDecoration: t.underline ? "underline" : "none",
-                color: t.color,
-                textAlign: t.align,
-                whiteSpace: "pre-wrap",
-                outline: "none",
-                lineHeight: t.lineSpacing,
-                letterSpacing: `${t.letterSpacing * props.scale}px`,
-                cursor: "text",
-              }}
-            >
-              {t.text}
-            </div>
-          );
+          body = (<div contentEditable={selected && props.activeTool === "select" && props.selectedIds.size === 1} suppressContentEditableWarning onBlur={(e2) => props.onUpdateElement(el.id, { text: e2.currentTarget.textContent || "" })} style={{ width: "100%", height: "100%", fontFamily: props.textPreviewFonts[el.id] ? fontFamilyStack(props.textPreviewFonts[el.id]) : t.font === "TimesRoman" ? "Times New Roman, serif" : t.font === "Courier" ? "monospace" : "Helvetica, Arial, sans-serif", fontSize: t.fontSize * props.scale, fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? "italic" : "normal", textDecoration: t.underline ? "underline" : "none", color: t.color, textAlign: t.align, whiteSpace: "pre-wrap", outline: "none", lineHeight: t.lineSpacing, letterSpacing: `${t.letterSpacing * props.scale}px`, cursor: "text" }}>{t.text}</div>);
         } else if (el.type === "rect") {
-          const s = el as ShapeElement;
-          body = (
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`,
-                background: s.fill ?? "transparent",
-              }}
-            />
-          );
+          body = <div style={{ width: "100%", height: "100%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
+        } else if ((el.type as string) === "rounded-rect") {
+          body = <div style={{ width: "100%", height: "100%", borderRadius: 12 * props.scale, border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "ellipse") {
-          const s = el as ShapeElement;
-          body = (
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                borderRadius: "50%",
-                border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`,
-                background: s.fill ?? "transparent",
-              }}
-            />
-          );
+          body = <div style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "line") {
-          const s = el as ShapeElement;
-          body = (
-            <svg width="100%" height="100%" style={{ overflow: "visible" }}>
-              <line
-                x1={0}
-                y1={el.height * props.scale}
-                x2={el.width * props.scale}
-                y2={0}
-                stroke={s.stroke}
-                strokeWidth={s.strokeWidth * props.scale}
-              />
-            </svg>
-          );
+          const flip = (s as any).flipDiag;
+          body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}><line x1={0} y1={flip ? sh : 0} x2={sw} y2={flip ? 0 : sh} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" /></svg>);
+        } else if ((el.type as string) === "arrow") {
+          const aw = Math.max(10, Math.min(sw * 0.25, sh * 0.8));
+          const ah = aw * 0.65;
+          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
+            <line x1={0} y1={sh / 2} x2={sw - aw * 0.8} y2={sh / 2} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" />
+            <polygon points={`${sw - aw},${sh / 2 - ah / 2} ${sw},${sh / 2} ${sw - aw},${sh / 2 + ah / 2}`} fill={s.stroke} />
+          </svg>);
+        } else if ((el.type as string) === "triangle") {
+          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
+            <polygon points={`${sw / 2},0 ${sw},${sh} 0,${sh}`} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
+          </svg>);
+        } else if ((el.type as string) === "star") {
+          const cx = sw / 2, cy = sh / 2, outerR = Math.min(cx, cy) * 0.98, innerR = outerR * 0.42;
+          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
+            <polygon points={starSvgPoints(cx, cy, outerR, innerR)} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
+          </svg>);
+        } else if ((el.type as string) === "speech") {
+          const r = Math.min(10, sw * 0.05, sh * 0.08);
+          const tailH = sh * 0.22, bubH = sh - tailH;
+          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
+            <path d={`M ${r},0 L ${sw - r},0 Q ${sw},0 ${sw},${r} L ${sw},${bubH - r} Q ${sw},${bubH} ${sw - r},${bubH} L ${sw * 0.38},${bubH} L ${sw * 0.22},${sh} L ${sw * 0.3},${bubH} L ${r},${bubH} Q 0,${bubH} 0,${bubH - r} L 0,${r} Q 0,0 ${r},0 Z`} fill={s.fill ?? "white"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
+          </svg>);
         } else if (el.type === "draw") {
           const d = el as DrawElement;
           const pts = d.points.map((p) => `${p.x * props.scale},${p.y * props.scale}`).join(" ");
-          body = (
-            <svg width="100%" height="100%" style={{ overflow: "visible" }}>
-              <polyline
-                points={pts}
-                fill="none"
-                stroke={d.stroke}
-                strokeWidth={d.strokeWidth * props.scale}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          );
+          body = (<svg className="absolute inset-0 w-full h-full" style={{ overflow: "visible" }}>
+            <polyline points={pts} fill="none" stroke={d.stroke} strokeWidth={d.strokeWidth * props.scale} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>);
         } else if (el.type === "highlight") {
           body = <div style={{ width: "100%", height: "100%", background: (el as HighlightElement).color }} />;
         } else if (el.type === "underline") {
-          body = (
-            <div
-              style={{
-                width: "100%",
-                height: Math.max(1, 2 * props.scale),
-                marginTop: el.height * props.scale - 2 * props.scale,
-                background: (el as HighlightElement).color,
-              }}
-            />
-          );
+          body = <div style={{ width: "100%", height: Math.max(1, 2 * props.scale), marginTop: el.height * props.scale - 2 * props.scale, background: (el as HighlightElement).color }} />;
         } else if (el.type === "strikeout") {
-          body = (
-            <div
-              style={{
-                width: "100%",
-                height: Math.max(1, 2 * props.scale),
-                marginTop: (el.height * props.scale) / 2,
-                background: (el as HighlightElement).color,
-              }}
-            />
-          );
+          body = <div style={{ width: "100%", height: Math.max(1, 2 * props.scale), marginTop: (el.height * props.scale) / 2, background: (el as HighlightElement).color }} />;
         } else if (el.type === "squiggly") {
-          body = (
-            <svg width="100%" height="100%" style={{ overflow: "visible" }}>
-              <polyline
-                points={Array.from(
-                  { length: 10 },
-                  (_, i) =>
-                    `${i * (el.width / 9) * props.scale},${
-                      el.height * props.scale - (i % 2 === 0 ? 0 : 4 * props.scale)
-                    }`
-                ).join(" ")}
-                fill="none"
-                stroke={(el as HighlightElement).color}
-                strokeWidth={1.6 * props.scale}
-              />
-            </svg>
-          );
+          body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}>
+            <polyline points={Array.from({ length: 10 }, (_, i) => `${i * (el.width / 9) * props.scale},${el.height * props.scale - (i % 2 === 0 ? 0 : 4 * props.scale)}`).join(" ")} fill="none" stroke={(el as HighlightElement).color} strokeWidth={1.6 * props.scale} />
+          </svg>);
         } else if (el.type === "whiteout") {
-          body = (
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                background: (el as { color: string }).color || "#ffffff",
-              }}
-            />
-          );
+          body = <div style={{ width: "100%", height: "100%", background: (el as { color: string }).color || "#ffffff" }} />;
         } else if (el.type === "image") {
-          body = (
-            <img
-              src={(el as ImageElement).src}
-              draggable={false}
-              style={{ width: "100%", height: "100%", objectFit: "fill" }}
-            />
-          );
+          body = <img src={(el as ImageElement).src} draggable={false} style={{ width: "100%", height: "100%", objectFit: "fill" }} />;
         } else if (el.type === "sticky") {
-          const s = el as StickyElement;
-          body = (
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                background: s.color,
-                border: "1px solid rgba(0,0,0,0.15)",
-                borderRadius: 4,
-                boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-                padding: 4 * props.scale,
-                overflow: "hidden",
-              }}
-            >
-              <textarea
-                value={s.note}
-                onChange={(e2) => props.onUpdateElement(el.id, { note: e2.target.value })}
-                onPointerDown={(e2) => e2.stopPropagation()}
-                placeholder="Note…"
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  background: "transparent",
-                  border: "none",
-                  outline: "none",
-                  resize: "none",
-                  fontSize: 11 * Math.max(1, props.scale),
-                  color: "#3F3300",
-                }}
-              />
-            </div>
-          );
+          const st = el as StickyElement;
+          body = (<div style={{ width: "100%", height: "100%", background: st.color, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, boxShadow: "0 2px 6px rgba(0,0,0,0.15)", padding: 4 * props.scale, overflow: "hidden" }}>
+            <textarea value={st.note} onChange={(e2) => props.onUpdateElement(el.id, { note: e2.target.value })} onPointerDown={(e2) => e2.stopPropagation()} placeholder="Note…" style={{ width: "100%", height: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 11 * Math.max(1, props.scale), color: "#3F3300" }} />
+          </div>);
         } else if (el.type === "field-text") {
           const f = el as FieldTextElement;
-          body = (
-            <input
-              value={f.value}
-              placeholder={f.placeholder}
-              onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })}
-              onPointerDown={(e2) => e2.stopPropagation()}
-              style={{
-                width: "100%",
-                height: "100%",
-                border: `${1.5 * props.scale}px ${f.required ? "solid #DC2626" : "solid #DC2626"}`,
-                borderRadius: 4,
-                background: "rgba(220,38,38,0.05)",
-                fontSize: 12 * Math.max(1, props.scale),
-                padding: `0 ${6 * props.scale}px`,
-                outline: "none",
-              }}
-            />
-          );
+          body = <input value={f.value} placeholder={f.placeholder} onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })} onPointerDown={(e2) => e2.stopPropagation()} style={{ width: "100%", height: "100%", border: `${1.5 * props.scale}px solid #DC2626`, borderRadius: 4, background: "rgba(220,38,38,0.05)", fontSize: 12 * Math.max(1, props.scale), padding: `0 ${6 * props.scale}px`, outline: "none" }} />;
         } else if (el.type === "field-checkbox") {
           const f = el as FieldCheckboxElement;
-          body = (
-            <div
-              onPointerDown={(e2) => {
-                e2.stopPropagation();
-                props.onUpdateElement(el.id, { checked: !f.checked });
-              }}
-              style={{
-                width: "100%",
-                height: "100%",
-                border: `${1.5 * props.scale}px solid ${f.required ? "#DC2626" : "#DC2626"}`,
-                borderRadius: 3,
-                background: f.checked ? "#DC2626" : "rgba(220,38,38,0.05)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-              }}
-            >
-              {f.checked && <Check style={{ width: "80%", height: "80%" }} className="text-white" />}
-            </div>
-          );
+          body = (<div onPointerDown={(e2) => { e2.stopPropagation(); props.onUpdateElement(el.id, { checked: !f.checked }); }} style={{ width: "100%", height: "100%", border: `${1.5 * props.scale}px solid #DC2626`, borderRadius: 3, background: f.checked ? "#DC2626" : "rgba(220,38,38,0.05)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+            {f.checked && <Check style={{ width: "80%", height: "80%" }} className="text-white" />}
+          </div>);
         } else if (el.type === "field-radio") {
           const f = el as FieldRadioElement;
-          body = (
-            <div
-              onPointerDown={(e2) => {
-                e2.stopPropagation();
-                props.onUpdateElement(el.id, { checked: !f.checked });
-              }}
-              style={{
-                width: "100%",
-                height: "100%",
-                borderRadius: "50%",
-                border: `${1.5 * props.scale}px solid ${f.required ? "#DC2626" : "#DC2626"}`,
-                background: "rgba(220,38,38,0.05)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-              }}
-            >
-              {f.checked && (
-                <div style={{ width: "55%", height: "55%", borderRadius: "50%", background: "#DC2626" }} />
-              )}
-            </div>
-          );
+          body = (<div onPointerDown={(e2) => { e2.stopPropagation(); props.onUpdateElement(el.id, { checked: !f.checked }); }} style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${1.5 * props.scale}px solid #DC2626`, background: "rgba(220,38,38,0.05)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+            {f.checked && <div style={{ width: "55%", height: "55%", borderRadius: "50%", background: "#DC2626" }} />}
+          </div>);
         } else if (el.type === "field-dropdown") {
           const f = el as FieldDropdownElement;
-          body = (
-            <select
-              value={f.value}
-              onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })}
-              onPointerDown={(e2) => e2.stopPropagation()}
-              style={{
-                width: "100%",
-                height: "100%",
-                border: `${1.5 * props.scale}px solid ${f.required ? "#DC2626" : "#DC2626"}`,
-                borderRadius: 4,
-                background: "rgba(220,38,38,0.05)",
-                fontSize: 12 * Math.max(1, props.scale),
-              }}
-            >
-              {f.options.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          );
+          body = (<select value={f.value} onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })} onPointerDown={(e2) => e2.stopPropagation()} style={{ width: "100%", height: "100%", border: `${1.5 * props.scale}px solid #DC2626`, borderRadius: 4, background: "rgba(220,38,38,0.05)", fontSize: 12 * Math.max(1, props.scale) }}>
+            {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>);
         }
 
         return (
-          <div
-            key={el.id}
-            style={style}
-            onPointerDown={(e) => startMove(e, el)}
-            className={cn(
-              selected &&
-                props.activeTool === "select" &&
-                "outline outline-2 outline-[#DC2626] outline-offset-1"
-            )}
-          >
+          <div key={el.id} style={style} onPointerDown={(e) => startMove(e, el)}
+            className={cn(selected && props.activeTool === "select" && "outline outline-2 outline-[#DC2626] outline-offset-1")}>
             {body}
-            {selected &&
-              props.activeTool === "select" &&
-              props.selectedIds.size === 1 &&
-              el.type !== "draw" &&
-              el.type !== "sticky" &&
-              !el.type.startsWith("field-") && (
-                <div
-                  onPointerDown={(e) => startResize(e, el)}
-                  style={{
-                    position: "absolute",
-                    right: -handleSize / 2,
-                    bottom: -handleSize / 2,
-                    width: handleSize,
-                    height: handleSize,
-                    borderRadius: 3,
-                    background: "#DC2626",
-                    cursor: "nwse-resize",
-                    touchAction: "none",
-                  }}
-                />
-              )}
-            {canRotateHandle && (
-              <div
-                onPointerDown={(e) => startRotate(e, el)}
-                style={{
-                  position: "absolute",
-                  left: "50%",
-                  top: rotateHandleTop,
-                  width: handleSize,
-                  height: handleSize,
-                  marginLeft: -handleSize / 2,
-                  borderRadius: "50%",
-                  background: "#DC2626",
-                  cursor: "grab",
-                  touchAction: "none",
-                }}
-              />
+            {selected && props.activeTool === "select" && props.selectedIds.size === 1 && el.type !== "draw" && el.type !== "sticky" && !el.type.startsWith("field-") && (
+              <div onPointerDown={(e) => startResize(e, el)} style={{ position: "absolute", right: -5, bottom: -5, width: 10, height: 10, borderRadius: 3, background: "#DC2626", cursor: "nwse-resize" }} />
             )}
+            {canRotate && (<div onPointerDown={(e) => startRotate(e, el)} style={{ position: "absolute", left: "50%", top: -22, width: 10, height: 10, marginLeft: -5, borderRadius: "50%", background: "#DC2626", cursor: "grab" }} />)}
           </div>
         );
       })}
 
-      {draft && (
-        <div
-          style={{
-            position: "absolute",
-            left: draft.x * props.scale,
-            top: draft.y * props.scale,
-            width: draft.w * props.scale,
-            height: draft.h * props.scale,
-            border: "1.5px dashed #DC2626",
-            background:
-              props.activeTool === "highlight" ? "rgba(253,224,71,0.35)" : "rgba(220,38,38,0.06)",
-            pointerEvents: "none",
-          }}
-        />
-      )}
+      {draft && (<div style={{ position: "absolute", left: draft.x * props.scale, top: draft.y * props.scale, width: draft.w * props.scale, height: draft.h * props.scale, border: "1.5px dashed #DC2626", background: props.activeTool === "highlight" ? "rgba(253,224,71,0.35)" : "rgba(220,38,38,0.06)", pointerEvents: "none" }} />)}
       {drawPoints && drawPoints.length > 1 && (
-        <svg
-          className="absolute inset-0"
-          width="100%"
-          height="100%"
-          style={{ pointerEvents: "none", overflow: "visible" }}
-        >
-          <polyline
-            points={drawPoints.map((p) => `${p.x * props.scale},${p.y * props.scale}`).join(" ")}
-            fill="none"
-            stroke={props.brushColor}
-            strokeWidth={props.brushSize * props.scale}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+        <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none", overflow: "visible" }}>
+          <polyline points={drawPoints.map((p) => `${p.x * props.scale},${p.y * props.scale}`).join(" ")} fill="none" stroke={props.drawStroke.color} strokeWidth={props.drawStroke.width * props.scale} strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
-      {marquee && (
-        <div
-          style={{
-            position: "absolute",
-            left: marquee.x * props.scale,
-            top: marquee.y * props.scale,
-            width: marquee.w * props.scale,
-            height: marquee.h * props.scale,
-            border: "1px dashed #DC2626",
-            background: "rgba(220,38,38,0.08)",
-            pointerEvents: "none",
-          }}
-        />
-      )}
+      {marquee && (<div style={{ position: "absolute", left: marquee.x * props.scale, top: marquee.y * props.scale, width: marquee.w * props.scale, height: marquee.h * props.scale, border: "1px dashed #DC2626", background: "rgba(220,38,38,0.08)", pointerEvents: "none" }} />)}
+      {eraserPos && (<div style={{ position: "absolute", left: (eraserPos.x - props.eraserSize) * props.scale, top: (eraserPos.y - props.eraserSize) * props.scale, width: props.eraserSize * 2 * props.scale, height: props.eraserSize * 2 * props.scale, borderRadius: "50%", border: "2px solid #DC2626", background: "rgba(220,38,38,0.08)", pointerEvents: "none" }} />)}
     </div>
   );
 }
 
-function SignatureModal({
-  tab,
-  onTabChange,
-  typedSignature,
-  onTypedChange,
-  canvasRef,
-  drawingRef,
-  onClear,
-  onCancel,
-  onInsert,
-  saveAfterInsert,
-  onSaveAfterInsertChange,
-  savedSignatures,
-  onUseSaved,
-  onDeleteSaved,
-}: {
-  tab: "draw" | "type" | "saved";
-  onTabChange: (t: "draw" | "type" | "saved") => void;
-  typedSignature: string;
-  onTypedChange: (s: string) => void;
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  drawingRef: React.RefObject<boolean>;
-  onClear: () => void;
-  onCancel: () => void;
-  onInsert: () => void;
-  saveAfterInsert: boolean;
-  onSaveAfterInsertChange: (v: boolean) => void;
-  savedSignatures: SavedSignature[];
-  onUseSaved: (src: string) => void;
-  onDeleteSaved: (id: string) => void;
+/* =========================================================  PROPERTIES PANEL  ========================================================= */
+function ContextPropertiesPanel({ selectedElements, singleSelected, activeTool, eraserSize, onEraserSizeChange, onUpdateElement, onUpdateElements, onDeleteElements, onDuplicateElements, onImageReplace, onBringToFront, onSendToBack, onRotatePage, onDuplicatePage, onExtractPage, textPreviewFonts, onSetPreviewFont }: {
+  selectedElements: AnyElement[]; singleSelected: AnyElement | null; activeTool: Tool;
+  eraserSize: number; onEraserSizeChange: (n: number) => void;
+  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
+  onUpdateElements: (patch: Partial<AnyElement>) => void;
+  onDeleteElements: () => void; onDuplicateElements: () => void; onImageReplace: () => void;
+  onBringToFront: () => void; onSendToBack: () => void;
+  onRotatePage: () => void; onDuplicatePage: () => void; onExtractPage: () => void;
+  textPreviewFonts: Record<string, string>; onSetPreviewFont: (id: string, family: string) => void;
 }) {
-  
-  function startDraw(e: ReactPointerEvent<HTMLCanvasElement>) {
-    drawingRef.current = true;
-    draw(e);
-  }
-  
-  function draw(e: ReactPointerEvent<HTMLCanvasElement>) {
-    if (!drawingRef.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.fillStyle = "#111827";
-    ctx.beginPath();
-    ctx.arc(x, y, 1.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineTo(x, y);
-    ctx.strokeStyle = "#111827";
-    ctx.lineWidth = 2.4;
-    ctx.lineCap = "round";
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+  const colorSwatches = ["#000000","#FFFFFF","#DC2626","#2563EB","#16A34A","#EAB308","#9333EA","#6B7280"];
+  const filledShapes = ["rect","ellipse","triangle","star","rounded-rect","speech"];
+
+  if (activeTool === "eraser") {
+    return (
+      <div className="p-4 space-y-4">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-800 pb-2">Eraser</h3>
+        <PropRow label="Eraser radius (PDF units)">
+          <div className="flex items-center gap-2">
+            <input type="range" min={5} max={60} value={eraserSize} onChange={(e) => onEraserSizeChange(Number(e.target.value))} className="flex-1 accent-[#DC2626]" />
+            <span className="text-xs text-gray-500 w-5">{eraserSize}</span>
+          </div>
+        </PropRow>
+        <p className="text-xs text-gray-400 leading-relaxed">Drag over freehand strokes to partially erase them. Other elements are unaffected.</p>
+      </div>
+    );
   }
 
-  function endDraw() {
-    drawingRef.current = false;
+  if (selectedElements.length > 1) {
+    return (
+      <div className="p-4 space-y-5">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-800 pb-2">{selectedElements.length} elements selected</h3>
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" size="sm" onClick={onDuplicateElements} className="rounded-md text-xs h-8"><Copy className="w-3.5 h-3.5 mr-1.5" /> Duplicate</Button>
+          <Button variant="outline" size="sm" onClick={onDeleteElements} className="rounded-md text-xs h-8 border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5 mr-1.5" /> Delete</Button>
+        </div>
+        <PropRow label="Layer order"><div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={onBringToFront} className="rounded-md text-xs h-8">Bring forward</Button><Button variant="outline" size="sm" onClick={onSendToBack} className="rounded-md text-xs h-8">Send back</Button></div></PropRow>
+        <PropRow label="Opacity"><input type="range" min={0.1} max={1} step={0.05} onChange={(e) => onUpdateElements({ opacity: Number(e.target.value) })} className="w-full accent-[#DC2626]" /></PropRow>
+      </div>
+    );
+  }
+
+  if (singleSelected) {
+    const el = singleSelected;
+    const isShape = ["rect","ellipse","line","arrow","triangle","star","rounded-rect","speech"].includes(el.type);
+    const title = el.type === "text" ? "Text" : el.type === "image" ? "Image" : el.type === "draw" ? "Drawing" : isShape ? "Shape" : el.type === "sticky" ? "Sticky note" : ["highlight","underline","strikeout","squiggly"].includes(el.type) ? "Highlight" : "Element";
+
+    return (
+      <div className="p-4 space-y-5">
+        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
+          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{title}</h3>
+          <div className="flex items-center gap-0.5">
+            <button onClick={onDuplicateElements} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500" title="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
+            <button onClick={onDeleteElements} className="p-1.5 rounded hover:bg-red-50 text-gray-500 hover:text-red-600" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+          </div>
+        </div>
+
+        {el.type === "text" && (
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-1.5">Font style</div>
+              <select value={textPreviewFonts[el.id] || (el as TextElement).font} onChange={(e) => onSetPreviewFont(el.id, e.target.value)} className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-800 dark:text-gray-100 focus:outline-none focus:border-[#DC2626]">
+                <optgroup label="Standard">{SYSTEM_FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}</optgroup>
+                <optgroup label="Google Fonts">{GOOGLE_FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}</optgroup>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <select value={(el as TextElement).font} onChange={(e) => onUpdateElement(el.id, { font: e.target.value as TextElement["font"] })} className="flex-1 h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-800 dark:text-gray-100 focus:outline-none focus:border-[#DC2626]">
+                {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f === "TimesRoman" ? "Times New Roman" : f} (PDF)</option>)}
+              </select>
+              <input type="number" min={6} max={96} value={(el as TextElement).fontSize} onChange={(e) => onUpdateElement(el.id, { fontSize: Number(e.target.value) })} className="w-14 h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center focus:outline-none focus:border-[#DC2626]" />
+            </div>
+            <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-800 p-1 rounded-md border border-gray-200 dark:border-gray-700">
+              {[["bold","B",Bold],["italic","I",Italic],["underline","U",UnderlineIcon]].map(([k, , Icon]: any) => (
+                <button key={k} onClick={() => onUpdateElement(el.id, { [k]: !(el as TextElement)[k as keyof TextElement] })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement)[k as keyof TextElement] ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500")}><Icon className="w-3.5 h-3.5" /></button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-800 p-1 rounded-md border border-gray-200 dark:border-gray-700">
+              {[["left",AlignLeft],["center",AlignCenter],["right",AlignRight]].map(([a, Icon]: any) => (
+                <button key={a} onClick={() => onUpdateElement(el.id, { align: a })} className={cn("flex-1 h-7 rounded flex items-center justify-center", (el as TextElement).align === a ? "bg-white dark:bg-gray-700 text-[#DC2626] shadow-sm" : "text-gray-500")}><Icon className="w-3.5 h-3.5" /></button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {el.type === "image" && <Button onClick={onImageReplace} variant="outline" className="w-full rounded-md text-xs h-8">Replace image</Button>}
+
+        {(el.type === "draw" || isShape) && (
+          <div className="space-y-4">
+            <PropRow label="Stroke width"><input type="number" min={1} max={20} value={(el as DrawElement | ShapeElement).strokeWidth} onChange={(e) => onUpdateElement(el.id, { strokeWidth: Number(e.target.value) })} className="w-full h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs outline-none focus:border-[#DC2626]" /></PropRow>
+            {isShape && filledShapes.includes(el.type) && (
+              <PropRow label="Fill color">
+                <div className="flex items-center gap-2">
+                  <input type="color" value={(el as ShapeElement).fill ?? "#ffffff"} onChange={(e) => onUpdateElement(el.id, { fill: e.target.value })} className="w-8 h-8 rounded cursor-pointer border border-gray-200 p-0.5" />
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" checked={(el as ShapeElement).fill === null} onChange={(e) => onUpdateElement(el.id, { fill: e.target.checked ? null : "#ffffff" })} className="accent-[#DC2626]" /> No fill</label>
+                </div>
+              </PropRow>
+            )}
+          </div>
+        )}
+
+        {el.type !== "image" && (
+          <PropRow label="Color">
+            <div className="flex items-center gap-2">
+              <input type="color" value={(el as TextElement).color || (el as ShapeElement).stroke || (el as HighlightElement).color || "#000000"}
+                onChange={(e) => {
+                  if (el.type === "text" || el.type.startsWith("field-") || ["squiggly","strikeout","underline","highlight"].includes(el.type)) onUpdateElement(el.id, { color: e.target.value });
+                  else onUpdateElement(el.id, { stroke: e.target.value });
+                }} className="w-8 h-8 rounded-full cursor-pointer border border-gray-200 p-0.5 shrink-0" />
+              <div className="flex-1 flex flex-wrap gap-1.5">
+                {colorSwatches.map((color) => (
+                  <button key={color} onClick={() => {
+                    if (el.type === "text" || el.type.startsWith("field-") || ["squiggly","strikeout","underline","highlight"].includes(el.type)) onUpdateElement(el.id, { color });
+                    else onUpdateElement(el.id, { stroke: color });
+                  }} className="w-5 h-5 rounded-full border border-gray-200 hover:scale-110 transition-transform" style={{ background: color }} />
+                ))}
+              </div>
+            </div>
+          </PropRow>
+        )}
+
+        <PropRow label="Opacity"><input type="range" min={0.1} max={1} step={0.05} value={el.opacity} onChange={(e) => onUpdateElement(el.id, { opacity: Number(e.target.value) })} className="w-full accent-[#DC2626]" /></PropRow>
+        {el.type !== "draw" && el.type !== "sticky" && !el.type.startsWith("field-") && !["highlight","underline","strikeout","squiggly"].includes(el.type) && (
+          <PropRow label="Rotation">
+            <div className="flex items-center gap-2">
+              <input type="range" min={0} max={359} value={el.rotation} onChange={(e) => onUpdateElement(el.id, { rotation: Number(e.target.value) })} className="flex-1 accent-[#DC2626]" />
+              <span className="text-xs text-gray-500 w-9 text-right tabular-nums">{el.rotation}°</span>
+            </div>
+          </PropRow>
+        )}
+        <PropRow label="Layer order"><div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={onBringToFront} className="rounded-md text-xs h-8">Bring forward</Button><Button variant="outline" size="sm" onClick={onSendToBack} className="rounded-md text-xs h-8">Send back</Button></div></PropRow>
+      </div>
+    );
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[999999] grid place-items-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onCancel}
-    >
-      <div
-        className="w-full max-w-md rounded-xl border border-[#E5E7EB] dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-2xl"
-        onClick={(e: ReactMouseEvent) => e.stopPropagation()}
-      >
-        <div className="mb-4 text-lg font-bold text-[#111827] dark:text-gray-100">Add signature</div>
+    <div className="p-4 space-y-5">
+      <div><h3 className="text-sm font-semibold mb-1">Edit PDF</h3><p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">Use the toolbar to add text, images, and annotations. Select any element to edit its properties here.</p></div>
+      <div>
+        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Page actions</h4>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Button variant="outline" size="sm" onClick={onRotatePage} className="rounded-md text-xs h-8"><RotateCw className="w-3.5 h-3.5 mr-1.5" /> Rotate</Button>
+          <Button variant="outline" size="sm" onClick={onDuplicatePage} className="rounded-md text-xs h-8"><Copy className="w-3.5 h-3.5 mr-1.5" /> Duplicate</Button>
+        </div>
+        <Button variant="outline" size="sm" onClick={onExtractPage} className="w-full rounded-md text-xs h-8"><Download className="w-3.5 h-3.5 mr-1.5" /> Extract current page</Button>
+      </div>
+    </div>
+  );
+}
+
+function PropRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{label}</div>{children}</div>;
+}
+
+/* =========================================================  SIGNATURE MODAL — fixed, self-contained, smooth drawing  ========================================================= */
+function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: {
+  onInsert: (src: string, save: boolean) => void; onCancel: () => void;
+  savedSignatures: SavedSignature[]; onDeleteSaved: (id: string) => void;
+}) {
+  const [tab, setTab] = useState<"draw" | "type" | "saved">("draw");
+  const [typedName, setTypedName] = useState("");
+  const [sigFont, setSigFont] = useState("Dancing Script");
+  const [sigColor, setSigColor] = useState("#111827");
+  const [sigSize, setSigSize] = useState(52);
+  const [saveAfterInsert, setSaveAfterInsert] = useState(true);
+  const [hasDrawing, setHasDrawing] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDrawing = useRef(false);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  // Load Google Fonts for signatures
+  useEffect(() => {
+    SIG_FONTS.forEach(({ family }) => {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, "+")}:wght@400;700&display=swap`;
+      document.head.appendChild(link);
+    });
+  }, []);
+
+  function getPointerPos(e: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) };
+  }
+
+  function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    const canvas = canvasRef.current; if (!canvas) return;
+    canvas.setPointerCapture(e.pointerId);
+    isDrawing.current = true;
+    const pos = getPointerPos(e);
+    lastPos.current = pos;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    ctx.strokeStyle = sigColor; ctx.fillStyle = sigColor;
+    ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    // Draw initial dot so single taps are visible
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    setHasDrawing(true);
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!isDrawing.current || !lastPos.current) return;
+    e.preventDefault();
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    const pos = getPointerPos(e);
+    // Smooth with midpoint quadratic bezier — eliminates jagged lines
+    const midX = (lastPos.current.x + pos.x) / 2;
+    const midY = (lastPos.current.y + pos.y) / 2;
+    ctx.strokeStyle = sigColor;
+    ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.quadraticCurveTo(lastPos.current.x, lastPos.current.y, midX, midY);
+    ctx.stroke();
+    lastPos.current = pos;
+  }
+
+  function onPointerUp() { isDrawing.current = false; lastPos.current = null; }
+
+  function clearCanvas() {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasDrawing(false);
+  }
+
+  async function handleInsert() {
+    if (tab === "draw") {
+      if (!hasDrawing) { toast.error("Please draw your signature first."); return; }
+      const canvas = canvasRef.current; if (!canvas) return;
+      onInsert(canvas.toDataURL("image/png"), saveAfterInsert);
+    } else if (tab === "type") {
+      const name = typedName.trim() || "Signature";
+      const canvas = document.createElement("canvas");
+      canvas.width = 480; canvas.height = 140;
+      const ctx = canvas.getContext("2d"); if (!ctx) return;
+      await document.fonts.ready;
+      ctx.font = `${sigSize}px '${sigFont}', cursive`;
+      ctx.fillStyle = sigColor; ctx.textBaseline = "middle";
+      const w = ctx.measureText(name).width;
+      ctx.fillText(name, Math.max(8, (480 - w) / 2), 70);
+      onInsert(canvas.toDataURL("image/png"), saveAfterInsert);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[999999] grid place-items-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
+      <div className="w-full max-w-lg rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-2xl" onClick={(e: ReactMouseEvent) => e.stopPropagation()}>
+        <div className="mb-4 text-lg font-bold text-gray-900 dark:text-gray-100">Add signature</div>
+
         <div className="mb-4 flex gap-1 border-b border-gray-200 dark:border-gray-800">
-          <button
-            onClick={() => onTabChange("draw")}
-            className={cn(
-              "flex-1 pb-2 text-sm font-semibold transition-all border-b-2",
-              tab === "draw" ? "border-[#DC2626] text-[#DC2626]" : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-300"
-            )}
-          >
-            Draw
-          </button>
-          <button
-            onClick={() => onTabChange("type")}
-            className={cn(
-              "flex-1 pb-2 text-sm font-semibold transition-all border-b-2",
-              tab === "type" ? "border-[#DC2626] text-[#DC2626]" : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-300"
-            )}
-          >
-            Type
-          </button>
-          <button
-            onClick={() => onTabChange("saved")}
-            className={cn(
-              "flex-1 pb-2 text-sm font-semibold transition-all border-b-2",
-              tab === "saved" ? "border-[#DC2626] text-[#DC2626]" : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-300"
-            )}
-          >
-            Saved ({savedSignatures.length})
-          </button>
+          {(["draw","type","saved"] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)} className={cn("flex-1 pb-2 text-sm font-semibold transition-all border-b-2", tab === t ? "border-[#DC2626] text-[#DC2626]" : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-300")}>
+              {t === "saved" ? `Saved (${savedSignatures.length})` : t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
         </div>
 
         {tab === "draw" && (
           <div>
-            <canvas
-              ref={canvasRef}
-              width={420}
-              height={160}
-              className="w-full cursor-crosshair rounded-lg border border-[#E5E7EB] dark:border-gray-700 bg-[#F8F9FA] dark:bg-gray-800"
-              onPointerDown={startDraw}
-              onPointerMove={draw}
-              onPointerUp={endDraw}
-              onPointerLeave={endDraw}
-              onPointerCancel={endDraw}
+            <canvas ref={canvasRef} width={460} height={160}
+              className="w-full cursor-crosshair rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
               style={{ touchAction: "none" }}
+              onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}
             />
-            <div className="mt-3 flex items-center justify-between">
-              <button onClick={onClear} className="text-sm font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-300">
-                Clear
-              </button>
-              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={saveAfterInsert}
-                  onChange={(e) => onSaveAfterInsertChange(e.target.checked)}
-                  className="accent-[#DC2626] w-4 h-4"
-                />{" "}
-                Save signature
-              </label>
+            <div className="mt-3 flex items-center gap-3">
+              <label className="text-xs text-gray-500">Ink color</label>
+              <input type="color" value={sigColor} onChange={(e) => setSigColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer border border-gray-200" />
+              <button onClick={clearCanvas} className="ml-auto text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 font-medium">Clear</button>
             </div>
           </div>
         )}
+
         {tab === "type" && (
-          <div>
-            <input
-              autoFocus
-              value={typedSignature}
-              onChange={(e) => onTypedChange(e.target.value)}
-              placeholder="Type your name"
-              className="h-32 w-full rounded-lg border border-[#E5E7EB] dark:border-gray-700 bg-[#F8F9FA] dark:bg-gray-800 px-4 text-center font-serif text-4xl italic text-[#111827] dark:text-gray-100 focus:outline-none focus:border-[#DC2626] transition-colors"
-            />
-            <label className="mt-3 flex items-center justify-end gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={saveAfterInsert}
-                onChange={(e) => onSaveAfterInsertChange(e.target.checked)}
-                className="accent-[#DC2626] w-4 h-4"
-              />{" "}
-              Save signature
-            </label>
+          <div className="space-y-4">
+            <input autoFocus value={typedName} onChange={(e) => setTypedName(e.target.value)} placeholder="Type your name"
+              className="w-full h-16 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 text-center focus:outline-none focus:border-[#DC2626] transition-colors"
+              style={{ fontFamily: `'${sigFont}', cursive`, fontSize: Math.min(sigSize * 0.7, 42), color: sigColor }} />
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-2">Style</div>
+              <div className="grid grid-cols-3 gap-2">
+                {SIG_FONTS.map((f) => (
+                  <button key={f.family} onClick={() => setSigFont(f.family)}
+                    className={cn("py-3 px-2 rounded-lg border text-center transition-all overflow-hidden min-h-[56px]", sigFont === f.family ? "border-[#DC2626] bg-red-50 dark:bg-red-900/20" : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800")}
+                    style={{ fontFamily: `'${f.family}', cursive`, fontSize: 22, color: sigColor }}>
+                    {typedName || "Sign"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="text-xs text-gray-500">Color</label>
+              <input type="color" value={sigColor} onChange={(e) => setSigColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer border border-gray-200" />
+              <label className="text-xs text-gray-500 ml-2">Size</label>
+              <input type="range" min={24} max={80} value={sigSize} onChange={(e) => setSigSize(Number(e.target.value))} className="flex-1 min-w-[80px] accent-[#DC2626]" />
+            </div>
           </div>
         )}
+
         {tab === "saved" && (
           <div className="grid max-h-64 grid-cols-2 gap-3 overflow-auto">
-            {savedSignatures.length === 0 && (
-              <div className="col-span-2 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                You haven't saved any signatures yet.
-              </div>
-            )}
+            {savedSignatures.length === 0 && <div className="col-span-2 py-8 text-center text-sm text-gray-500">No saved signatures yet.</div>}
             {savedSignatures.map((s) => (
-              <div key={s.id} className="group relative rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm p-2 flex flex-col items-center">
-                <img src={s.src} alt="Saved signature" className="h-16 w-full object-contain mb-2 bg-white" />
-                <div className="flex w-full gap-1">
-                  <button
-                    onClick={() => onUseSaved(s.src)}
-                    className="flex-1 py-1.5 rounded bg-[#DC2626] text-xs font-bold text-white hover:bg-[#B91C1C]"
-                  >
-                    Insert
-                  </button>
-                  <button
-                    onClick={() => onDeleteSaved(s.id)}
-                    className="w-8 flex items-center justify-center rounded border border-gray-200 dark:border-gray-600 text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-900"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+              <div key={s.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2">
+                <img src={s.src} alt="Saved signature" className="h-16 w-full object-contain mb-2" />
+                <div className="flex gap-1">
+                  <button onClick={() => onInsert(s.src, false)} className="flex-1 py-1.5 rounded bg-[#DC2626] text-xs font-bold text-white hover:bg-[#B91C1C]">Insert</button>
+                  <button onClick={() => onDeleteSaved(s.id)} className="w-8 flex items-center justify-center rounded border border-gray-200 text-gray-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
             ))}
           </div>
         )}
 
+        {tab !== "saved" && (
+          <label className="mt-3 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={saveAfterInsert} onChange={(e) => setSaveAfterInsert(e.target.checked)} className="accent-[#DC2626] w-4 h-4" /> Save signature for later
+          </label>
+        )}
+
         <div className="mt-6 flex justify-end gap-2">
-          <Button variant="outline" onClick={onCancel} className="rounded-lg border-gray-300 dark:border-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-50 dark:hover:bg-gray-800">
-            Cancel
-          </Button>
-          {tab !== "saved" && (
-            <Button onClick={onInsert} className="rounded-lg bg-[#DC2626] text-white hover:bg-[#B91C1C] font-bold px-6">
-              Apply
-            </Button>
-          )}
+          <Button variant="outline" onClick={onCancel} className="rounded-lg border-gray-300 dark:border-gray-700 font-semibold">Cancel</Button>
+          {tab !== "saved" && <Button onClick={handleInsert} className="rounded-lg bg-[#DC2626] text-white hover:bg-[#B91C1C] font-bold px-6">Insert</Button>}
         </div>
       </div>
     </div>
   );
 }
 
-function SuccessScreen({
-  result,
-  onDownload,
-  onEditAgain,
-  onNewFile,
-}: {
-  result: { blob: Blob; filename: string; thumb: string | null; pages: number };
-  onDownload: () => void;
-  onEditAgain: () => void;
-  onNewFile: () => void;
-}) {
+/* =========================================================  SUCCESS SCREEN  ========================================================= */
+function SuccessScreen({ result, onDownload, onEditAgain, onNewFile }: { result: { blob: Blob; filename: string; thumb: string | null; pages: number }; onDownload: () => void; onEditAgain: () => void; onNewFile: () => void }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="max-w-2xl mx-auto my-auto overflow-hidden rounded-xl border border-[#E5E7EB] dark:border-gray-800 bg-white dark:bg-gray-900 shadow-2xl"
-    >
-      <div className="border-b border-[#E5E7EB] dark:border-gray-800 bg-red-50/50 dark:bg-red-900/10 px-8 py-6">
+    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="max-w-2xl mx-auto overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-2xl">
+      <div className="border-b border-gray-200 dark:border-gray-800 bg-red-50/50 dark:bg-red-900/10 px-8 py-6">
         <div className="flex items-center gap-4">
-          <div className="grid h-14 w-14 place-items-center rounded-full bg-[#DC2626] text-white shadow-sm">
-            <FileCheck2 className="h-7 w-7" />
-          </div>
+          <div className="grid h-14 w-14 place-items-center rounded-full bg-[#DC2626] text-white shadow-sm"><FileCheck2 className="h-7 w-7" /></div>
           <div>
-            <div className="text-2xl font-bold text-[#111827] dark:text-gray-100">PDF ready to download</div>
-            <div className="text-sm text-[#6B7280] dark:text-gray-400 mt-1 font-medium">
-              {result.filename} <span className="mx-1">•</span> {formatBytes(result.blob.size)} <span className="mx-1">•</span> {result.pages} pages
-            </div>
+            <div className="text-2xl font-bold">PDF ready to download</div>
+            <div className="text-sm text-gray-500 mt-1">{result.filename} · {formatBytes(result.blob.size)} · {result.pages} pages</div>
           </div>
         </div>
       </div>
       <div className="grid gap-8 p-8 md:grid-cols-[minmax(0,1fr)_260px]">
-        <div className="rounded-xl border border-[#E5E7EB] dark:border-gray-800 bg-[#F8F9FA] dark:bg-gray-800 p-4 flex items-center justify-center">
-          {result.thumb ? (
-            <img src={result.thumb} alt="Preview of page 1" className="max-h-[380px] object-contain shadow-lg rounded border border-gray-200 dark:border-gray-700 bg-white" />
-          ) : (
-            <div className="text-sm font-medium text-[#6B7280] dark:text-gray-400">Preview unavailable</div>
-          )}
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800 p-4 flex items-center justify-center">
+          {result.thumb ? <img src={result.thumb} alt="Page 1 preview" className="max-h-[380px] object-contain shadow-lg rounded border border-gray-200 bg-white" /> : <div className="text-sm text-gray-500">Preview unavailable</div>}
         </div>
         <div className="flex flex-col gap-3 justify-center">
-          <Button
-            size="lg"
-            onClick={onDownload}
-            className="w-full rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white font-bold h-14 shadow-md text-base"
-          >
-            <Download className="mr-2 h-5 w-5" /> Download PDF
-          </Button>
+          <Button size="lg" onClick={onDownload} className="w-full rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white font-bold h-14 shadow-md text-base"><Download className="mr-2 h-5 w-5" /> Download PDF</Button>
           <div className="h-px bg-gray-100 dark:bg-gray-800 my-2" />
-          <Button
-            size="lg"
-            variant="outline"
-            onClick={onEditAgain}
-            className="w-full rounded-lg border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold h-12 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            Continue editing
-          </Button>
-          <Button
-            size="lg"
-            variant="ghost"
-            onClick={onNewFile}
-            className="w-full rounded-lg text-gray-500 dark:text-gray-400 font-semibold h-12 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            Upload new file
-          </Button>
+          <Button size="lg" variant="outline" onClick={onEditAgain} className="w-full rounded-lg border-gray-300 dark:border-gray-700 font-semibold h-12">Continue editing</Button>
+          <Button size="lg" variant="ghost" onClick={onNewFile} className="w-full rounded-lg text-gray-500 font-semibold h-12">Upload new file</Button>
         </div>
       </div>
     </motion.div>
