@@ -131,7 +131,7 @@ function starSvgPoints(cx: number, cy: number, outerR: number, innerR: number): 
 }
 
 export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, onApply }: {
-  file: File; mode: string; actionLabel: string; busy?: boolean;
+  file: File; mode: string; actionLabel: string; busy?: boolean; selectionHint?: string;
   onReplace: () => void; onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
 }) {
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
@@ -144,7 +144,6 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
   const [drawStroke, setDrawStroke] = useState<{ color: string; width: number }>({ color: "#DC2626", width: 2 });
   const [eraserSize, setEraserSize] = useState(15);
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
-  const [showRightSidebar, setShowRightSidebar] = useState(true);
   const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
   const loadedGoogleFontsRef = useRef<Set<string>>(new Set());
   const setPreviewFont = useCallback((id: string, family: string) => {
@@ -356,7 +355,7 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
     const reader = new FileReader();
     reader.onload = () => {
       const src = String(reader.result); const img = new Image();
-      img.onload = () => { const pid = pages[current]?.id; if (!pid) return; const s = Math.min(1, 220 / img.width); addElement({ id: makeId("img"), pageId: pid, type: "image", x: 60, y: 60, width: img.width * s, height: img.height * s, opacity: 1, rotation: 0, src } as ImageElement); };
+      img.onload = () => { const pid = pages[current]?.id; if (!pid) return; const s = Math.min(1, 220 / img.width); addElementKeepTool({ id: makeId("img"), pageId: pid, type: "image", x: 60, y: 60, width: img.width * s, height: img.height * s, opacity: 1, rotation: 0, src } as ImageElement); };
       img.src = src;
     };
     reader.readAsDataURL(f);
@@ -543,6 +542,32 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Properties Floating Panel */}
+          <AnimatePresence>
+            {(selectedIds.size > 0 || activeTool === "eraser") && (
+              <motion.div 
+                initial={{ opacity: 0, y: -4, scale: 0.95 }} 
+                animate={{ opacity: 1, y: 0, scale: 1 }} 
+                exit={{ opacity: 0, y: -4, scale: 0.95 }} 
+                style={{ position: "fixed", top: 64, right: 16 }} 
+                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl w-64 z-[10000] overflow-hidden"
+              >
+                <div className="max-h-[80vh] overflow-y-auto">
+                  <ContextPropertiesPanel selectedElements={selectedElements} singleSelected={singleSelected} activeTool={activeTool}
+                    eraserSize={eraserSize} onEraserSizeChange={setEraserSize}
+                    onUpdateElement={updateElement} onUpdateElements={(patch) => updateElements(selectedIds, () => patch)}
+                    onDeleteElements={() => deleteElements(selectedIds)} onDuplicateElements={() => duplicateElements(selectedIds)}
+                    onImageReplace={() => imageInputRef.current?.click()}
+                    onBringToFront={() => reorderZ(selectedIds, "front")} onSendToBack={() => reorderZ(selectedIds, "back")}
+                    onRotatePage={() => rotatePage(current, 90)} onDuplicatePage={() => duplicatePage(current)}
+                    onExtractPage={() => {}}
+                    textPreviewFonts={textPreviewFonts} onSetPreviewFont={setPreviewFont}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </>,
         document.body
       )}
@@ -610,35 +635,6 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
             <button onClick={() => setFitMode("page")} className={cn("p-1 rounded hover:bg-white/20", fitMode === "page" && "bg-white/25")} title="Fit page"><Maximize2 className="h-3.5 w-3.5" /></button>
           </div>
         </main>
-
-        <button onClick={() => setShowRightSidebar((s) => !s)} className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] rounded-l-lg py-3 px-1.5 text-white shadow-md" style={{ right: showRightSidebar ? 260 : 0 }}>
-          {showRightSidebar ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-        </button>
-
-        {/* RIGHT SIDEBAR */}
-        <AnimatePresence initial={false}>
-          {showRightSidebar && (
-            <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 260, opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 flex flex-col shrink-0 z-10">
-              <div className="flex-1 overflow-y-auto">
-                <ContextPropertiesPanel selectedElements={selectedElements} singleSelected={singleSelected} activeTool={activeTool}
-                  eraserSize={eraserSize} onEraserSizeChange={setEraserSize}
-                  onUpdateElement={updateElement} onUpdateElements={(patch) => updateElements(selectedIds, () => patch)}
-                  onDeleteElements={() => deleteElements(selectedIds)} onDuplicateElements={() => duplicateElements(selectedIds)}
-                  onImageReplace={() => imageInputRef.current?.click()}
-                  onBringToFront={() => reorderZ(selectedIds, "front")} onSendToBack={() => reorderZ(selectedIds, "back")}
-                  onRotatePage={() => rotatePage(current, 90)} onDuplicatePage={() => duplicatePage(current)}
-                  onExtractPage={() => {}}
-                  textPreviewFonts={textPreviewFonts} onSetPreviewFont={setPreviewFont}
-                />
-              </div>
-              <div className="p-3 border-t border-gray-200 dark:border-gray-800">
-                <Button onClick={apply} disabled={processing || busy} className="w-full h-11 rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm shadow-sm flex items-center justify-center gap-2">
-                  {processing ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <>{actionLabel || "Save changes"}<ArrowRight className="h-4 w-4" /></>}
-                </Button>
-              </div>
-            </motion.aside>
-          )}
-        </AnimatePresence>
       </div>
 
       {signatureOpen && (
@@ -678,16 +674,17 @@ function PreviewCanvas(props: {
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
-  const [visible, setVisible] = useState<Set<number>>(new Set([0]));
   useLayoutEffect(() => { const el = containerRef.current; if (!el) return; const ro = new ResizeObserver(() => setContainerSize({ w: el.clientWidth, h: el.clientHeight })); ro.observe(el); setContainerSize({ w: el.clientWidth, h: el.clientHeight }); return () => ro.disconnect(); }, []);
   const scale = useMemo(() => { if (!props.pdf) return 1.5; if (props.fitMode === "custom") return 1.5 * props.zoom; return props.fitMode === "width" ? 1.5 : 1.2; }, [props.pdf, props.fitMode, props.zoom]);
+  const [visible, setVisible] = useState<Set<number>>(new Set([0]));
+  
   useEffect(() => {
     const el = containerRef.current; if (!el) return;
     const items = Array.from(el.querySelectorAll<HTMLElement>("[data-page-index]"));
     const io = new IntersectionObserver((entries) => {
       setVisible((prev) => { const next = new Set(prev); entries.forEach((en) => { const idx = parseInt((en.target as Element).getAttribute("data-page-index") || "-1", 10); if (en.isIntersecting) next.add(idx); else next.delete(idx); }); return next; });
       const top = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      if (top) { const idx = parseInt(top.getAttribute("data-page-index") || "-1", 10); if (idx >= 0) props.onCurrentChange(idx); }
+      if (top) { const idx = parseInt((top.target as Element).getAttribute("data-page-index") || "-1", 10); if (idx >= 0) props.onCurrentChange(idx); }
     }, { root: el, rootMargin: "50% 0px", threshold: 0 });
     items.forEach((it) => io.observe(it)); return () => io.disconnect();
   }, [props.pages.length, props.onCurrentChange]);
@@ -807,6 +804,11 @@ function AnnotationLayer(props: {
   drawStroke: { color: string; width: number }; eraserSize: number;
 }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
+  const elementsRef = useRef(props.elements);
+  
+  // Track live elements for smooth erasure computation without closure staleness
+  useEffect(() => { elementsRef.current = props.elements; }, [props.elements]);
+
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [drawPoints, setDrawPoints] = useState<{ x: number; y: number }[] | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -839,8 +841,7 @@ function AnnotationLayer(props: {
       if (toRemove.length > 0) props.onReplaceElements(toRemove, toAdd);
       const onMove = (ev: PointerEvent) => {
         const p = toPt(ev.clientX, ev.clientY); setEraserPos(p);
-        // Note: props.elements is captured at pointerdown; for real-time erasure use ref pattern
-        const curr = props.elements.filter((el) => el.type === "draw") as DrawElement[];
+        const curr = elementsRef.current.filter((el) => el.type === "draw") as DrawElement[];
         const res = eraseFromDrawElements(p, props.eraserSize, curr);
         if (res.toRemove.length > 0) props.onReplaceElements(res.toRemove, res.toAdd);
       };
@@ -872,8 +873,8 @@ function AnnotationLayer(props: {
     const pt = toPt(e.clientX, e.clientY);
 
     // Single-click tools
-    if (props.activeTool === "text") { props.onAddElement({ id: makeId("txt"), pageId: props.pageId, type: "text", x: pt.x, y: pt.y, width: 180, height: 28, opacity: 1, rotation: 0, text: "Click to edit text", font: "Helvetica", fontSize: 14, bold: false, italic: false, underline: false, color: "#111827", align: "left", letterSpacing: 0, lineSpacing: 1.25 } as TextElement); return; }
-    if (props.activeTool === "sticky") { props.onAddElement({ id: makeId("sticky"), pageId: props.pageId, type: "sticky", x: pt.x, y: pt.y, width: 140, height: 100, opacity: 1, rotation: 0, color: "#FEF08A", note: "" } as StickyElement); return; }
+    if (props.activeTool === "text") { props.onAddElementKeepTool({ id: makeId("txt"), pageId: props.pageId, type: "text", x: pt.x, y: pt.y, width: 180, height: 28, opacity: 1, rotation: 0, text: "Click to edit text", font: "Helvetica", fontSize: 14, bold: false, italic: false, underline: false, color: "#111827", align: "left", letterSpacing: 0, lineSpacing: 1.25 } as TextElement); return; }
+    if (props.activeTool === "sticky") { props.onAddElementKeepTool({ id: makeId("sticky"), pageId: props.pageId, type: "sticky", x: pt.x, y: pt.y, width: 140, height: 100, opacity: 1, rotation: 0, color: "#FEF08A", note: "" } as StickyElement); return; }
     if (isFieldTool) {
       const base = { id: makeId(props.activeTool), pageId: props.pageId, opacity: 1, rotation: 0, x: pt.x, y: pt.y } as const;
       let el: AnyElement | null = null;
@@ -881,7 +882,7 @@ function AnnotationLayer(props: {
       else if (props.activeTool === "field-checkbox") el = { ...base, type: "field-checkbox", width: 18, height: 18, name: "checkbox", checked: false, required: false } as FieldCheckboxElement;
       else if (props.activeTool === "field-radio") el = { ...base, type: "field-radio", width: 18, height: 18, groupName: "radio_group", value: "option_1", checked: false, required: false } as FieldRadioElement;
       else if (props.activeTool === "field-dropdown") el = { ...base, type: "field-dropdown", width: 160, height: 26, name: "dropdown", options: ["Option 1", "Option 2"], value: "Option 1", required: false } as FieldDropdownElement;
-      if (el) props.onAddElement(el); return;
+      if (el) props.onAddElementKeepTool(el); return;
     }
 
     // Drag-based tools
@@ -905,7 +906,7 @@ function AnnotationLayer(props: {
           if (pts && pts.length > 1) {
             const xs = pts.map((pp) => pp.x), ys = pts.map((pp) => pp.y);
             const minX = Math.min(...xs), minY = Math.min(...ys), maxX = Math.max(...xs), maxY = Math.max(...ys);
-            props.onAddElement({ id: makeId("draw"), pageId: props.pageId, type: "draw", x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY), opacity: 1, rotation: 0, stroke: props.drawStroke.color, strokeWidth: props.drawStroke.width, points: pts.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })) } as DrawElement);
+            props.onAddElementKeepTool({ id: makeId("draw"), pageId: props.pageId, type: "draw", x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY), opacity: 1, rotation: 0, stroke: props.drawStroke.color, strokeWidth: props.drawStroke.width, points: pts.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })) } as DrawElement);
           }
           return null;
         });
@@ -918,19 +919,19 @@ function AnnotationLayer(props: {
 
       if (isShapeTool) {
         const flipDiag = (start.x < p.x) !== (start.y < p.y);
-        props.onAddElement({ id: makeId("shape"), pageId: props.pageId, type: props.activeTool.replace("shape-", ""), x, y, width: w, height: h, opacity: 1, rotation: 0, stroke: "#DC2626", strokeWidth: 2, fill: null, flipDiag } as unknown as ShapeElement);
+        props.onAddElementKeepTool({ id: makeId("shape"), pageId: props.pageId, type: props.activeTool.replace("shape-", ""), x, y, width: w, height: h, opacity: 1, rotation: 0, stroke: "#DC2626", strokeWidth: 2, fill: null, flipDiag } as unknown as ShapeElement);
       } else if (["highlight","underline","strikeout","squiggly"].includes(props.activeTool)) {
-        props.onAddElement({ id: makeId("markup"), pageId: props.pageId, type: props.activeTool, x, y, width: w, height: h, opacity: props.activeTool === "highlight" ? 0.35 : 1, rotation: 0, color: "#FDE047" } as HighlightElement);
+        props.onAddElementKeepTool({ id: makeId("markup"), pageId: props.pageId, type: props.activeTool, x, y, width: w, height: h, opacity: props.activeTool === "highlight" ? 0.35 : 1, rotation: 0, color: "#FDE047" } as HighlightElement);
       } else if (props.activeTool === "whiteout") {
-        props.onAddElement({ id: makeId("wo"), pageId: props.pageId, type: "whiteout", x, y, width: w, height: h, opacity: 1, rotation: 0, color: "#ffffff" });
+        props.onAddElementKeepTool({ id: makeId("wo"), pageId: props.pageId, type: "whiteout", x, y, width: w, height: h, opacity: 1, rotation: 0, color: "#ffffff" });
       }
     };
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
   function startMove(e: ReactPointerEvent, el: AnyElement) {
-    e.stopPropagation();
     if (!props.interactive || props.activeTool !== "select") return;
+    e.stopPropagation();
     let ids = props.selectedIds;
     if (e.shiftKey || e.metaKey || e.ctrlKey) { const n = new Set(ids); if (n.has(el.id)) n.delete(el.id); else n.add(el.id); props.onSetSelectedIds(n); ids = n; }
     else if (!ids.has(el.id)) { ids = new Set([el.id]); props.onSetSelectedIds(ids); }
@@ -977,7 +978,13 @@ function AnnotationLayer(props: {
         const canRotate = selected && props.activeTool === "select" && ROTATABLE_TYPES.has(el.type) && props.selectedIds.size === 1;
         const s = el as ShapeElement & { flipDiag?: boolean };
         const sw = el.width * props.scale, sh = el.height * props.scale;
-        const style: CSSProperties = { position: "absolute", left: el.x * props.scale, top: el.y * props.scale, width: sw, height: sh, opacity: el.opacity, transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined, transformOrigin: "center center" };
+        
+        const style: CSSProperties = { 
+          position: "absolute", left: el.x * props.scale, top: el.y * props.scale, width: sw, height: sh, 
+          opacity: el.opacity, transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined, 
+          transformOrigin: "center center",
+          pointerEvents: props.activeTool === "select" ? "auto" : "none" 
+        };
 
         let body: React.ReactNode = null;
         if (el.type === "text") {
@@ -985,30 +992,30 @@ function AnnotationLayer(props: {
           body = (<div contentEditable={selected && props.activeTool === "select" && props.selectedIds.size === 1} suppressContentEditableWarning onBlur={(e2) => props.onUpdateElement(el.id, { text: e2.currentTarget.textContent || "" })} style={{ width: "100%", height: "100%", fontFamily: props.textPreviewFonts[el.id] ? fontFamilyStack(props.textPreviewFonts[el.id]) : t.font === "TimesRoman" ? "Times New Roman, serif" : t.font === "Courier" ? "monospace" : "Helvetica, Arial, sans-serif", fontSize: t.fontSize * props.scale, fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? "italic" : "normal", textDecoration: t.underline ? "underline" : "none", color: t.color, textAlign: t.align, whiteSpace: "pre-wrap", outline: "none", lineHeight: t.lineSpacing, letterSpacing: `${t.letterSpacing * props.scale}px`, cursor: "text" }}>{t.text}</div>);
         } else if (el.type === "rect") {
           body = <div style={{ width: "100%", height: "100%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
-        } else if (el.type === "rounded-rect") {
+        } else if ((el.type as string) === "rounded-rect") {
           body = <div style={{ width: "100%", height: "100%", borderRadius: 12 * props.scale, border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "ellipse") {
           body = <div style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "line") {
           const flip = (s as any).flipDiag;
           body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}><line x1={0} y1={flip ? sh : 0} x2={sw} y2={flip ? 0 : sh} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" /></svg>);
-        } else if (el.type === "arrow") {
+        } else if ((el.type as string) === "arrow") {
           const aw = Math.max(10, Math.min(sw * 0.25, sh * 0.8));
           const ah = aw * 0.65;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
             <line x1={0} y1={sh / 2} x2={sw - aw * 0.8} y2={sh / 2} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" />
             <polygon points={`${sw - aw},${sh / 2 - ah / 2} ${sw},${sh / 2} ${sw - aw},${sh / 2 + ah / 2}`} fill={s.stroke} />
           </svg>);
-        } else if (el.type === "triangle") {
+        } else if ((el.type as string) === "triangle") {
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
             <polygon points={`${sw / 2},0 ${sw},${sh} 0,${sh}`} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
           </svg>);
-        } else if (el.type === "star") {
+        } else if ((el.type as string) === "star") {
           const cx = sw / 2, cy = sh / 2, outerR = Math.min(cx, cy) * 0.98, innerR = outerR * 0.42;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
             <polygon points={starSvgPoints(cx, cy, outerR, innerR)} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
           </svg>);
-        } else if (el.type === "speech") {
+        } else if ((el.type as string) === "speech") {
           const r = Math.min(10, sw * 0.05, sh * 0.08);
           const tailH = sh * 0.22, bubH = sh - tailH;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
@@ -1060,7 +1067,7 @@ function AnnotationLayer(props: {
         }
 
         return (
-          <div key={el.id} style={style} onPointerDown={(e) => startMove(e, el)}
+          <div key={el.id} style={style} onPointerDown={props.activeTool === "select" ? (e) => startMove(e, el) : undefined}
             className={cn(selected && props.activeTool === "select" && "outline outline-2 outline-[#DC2626] outline-offset-1")}>
             {body}
             {selected && props.activeTool === "select" && props.selectedIds.size === 1 && el.type !== "draw" && el.type !== "sticky" && !el.type.startsWith("field-") && (
