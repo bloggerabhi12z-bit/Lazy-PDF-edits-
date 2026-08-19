@@ -131,7 +131,7 @@ function starSvgPoints(cx: number, cy: number, outerR: number, innerR: number): 
 }
 
 export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, onApply }: {
-  file: File; mode: string; actionLabel: string; busy?: boolean; selectionHint?: string;
+  file: File; mode: string; actionLabel: string; busy?: boolean;
   onReplace: () => void; onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
 }) {
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
@@ -687,7 +687,7 @@ function PreviewCanvas(props: {
     const io = new IntersectionObserver((entries) => {
       setVisible((prev) => { const next = new Set(prev); entries.forEach((en) => { const idx = parseInt((en.target as Element).getAttribute("data-page-index") || "-1", 10); if (en.isIntersecting) next.add(idx); else next.delete(idx); }); return next; });
       const top = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      if (top) { const idx = parseInt((top.target as Element).getAttribute("data-page-index") || "-1", 10); if (idx >= 0) props.onCurrentChange(idx); }
+      if (top) { const idx = parseInt(top.getAttribute("data-page-index") || "-1", 10); if (idx >= 0) props.onCurrentChange(idx); }
     }, { root: el, rootMargin: "50% 0px", threshold: 0 });
     items.forEach((it) => io.observe(it)); return () => io.disconnect();
   }, [props.pages.length, props.onCurrentChange]);
@@ -985,30 +985,30 @@ function AnnotationLayer(props: {
           body = (<div contentEditable={selected && props.activeTool === "select" && props.selectedIds.size === 1} suppressContentEditableWarning onBlur={(e2) => props.onUpdateElement(el.id, { text: e2.currentTarget.textContent || "" })} style={{ width: "100%", height: "100%", fontFamily: props.textPreviewFonts[el.id] ? fontFamilyStack(props.textPreviewFonts[el.id]) : t.font === "TimesRoman" ? "Times New Roman, serif" : t.font === "Courier" ? "monospace" : "Helvetica, Arial, sans-serif", fontSize: t.fontSize * props.scale, fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? "italic" : "normal", textDecoration: t.underline ? "underline" : "none", color: t.color, textAlign: t.align, whiteSpace: "pre-wrap", outline: "none", lineHeight: t.lineSpacing, letterSpacing: `${t.letterSpacing * props.scale}px`, cursor: "text" }}>{t.text}</div>);
         } else if (el.type === "rect") {
           body = <div style={{ width: "100%", height: "100%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
-        } else if ((el.type as string) === "rounded-rect") {
+        } else if (el.type === "rounded-rect") {
           body = <div style={{ width: "100%", height: "100%", borderRadius: 12 * props.scale, border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "ellipse") {
           body = <div style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${s.strokeWidth * props.scale}px solid ${s.stroke}`, background: s.fill ?? "transparent" }} />;
         } else if (el.type === "line") {
           const flip = (s as any).flipDiag;
           body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}><line x1={0} y1={flip ? sh : 0} x2={sw} y2={flip ? 0 : sh} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" /></svg>);
-        } else if ((el.type as string) === "arrow") {
+        } else if (el.type === "arrow") {
           const aw = Math.max(10, Math.min(sw * 0.25, sh * 0.8));
           const ah = aw * 0.65;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
             <line x1={0} y1={sh / 2} x2={sw - aw * 0.8} y2={sh / 2} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinecap="round" />
             <polygon points={`${sw - aw},${sh / 2 - ah / 2} ${sw},${sh / 2} ${sw - aw},${sh / 2 + ah / 2}`} fill={s.stroke} />
           </svg>);
-        } else if ((el.type as string) === "triangle") {
+        } else if (el.type === "triangle") {
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
             <polygon points={`${sw / 2},0 ${sw},${sh} 0,${sh}`} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
           </svg>);
-        } else if ((el.type as string) === "star") {
+        } else if (el.type === "star") {
           const cx = sw / 2, cy = sh / 2, outerR = Math.min(cx, cy) * 0.98, innerR = outerR * 0.42;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
             <polygon points={starSvgPoints(cx, cy, outerR, innerR)} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeLinejoin="round" />
           </svg>);
-        } else if ((el.type as string) === "speech") {
+        } else if (el.type === "speech") {
           const r = Math.min(10, sw * 0.05, sh * 0.08);
           const tailH = sh * 0.22, bubH = sh - tailH;
           body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
