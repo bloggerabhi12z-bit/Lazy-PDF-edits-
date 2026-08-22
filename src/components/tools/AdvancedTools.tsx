@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import JSZip from "jszip";
-import mammoth from "mammoth/mammoth.browser";
 import PptxGenJS from "pptxgenjs";
 import { Document, ImageRun, Packer, Paragraph } from "docx";
 import { createWorker } from "tesseract.js";
@@ -15,7 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
 import { createTextPdf, stripHtml } from "@/lib/text-pdf";
-import { FileText, Loader2, X, ChevronUp, ChevronDown } from "lucide-react";
+import { renderWordToRealTextPdf } from "@/lib/docx-to-pdf";
+import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -332,6 +332,13 @@ async function renderHtmlToPdfBlob(html: string) {
   const pageHeightPt = 841.89;
   const cssWidthPx = 794; // A4 width at 96dpi
 
+  // html2canvas can't parse modern CSS color functions like oklch()/
+  // color-mix(), which this site's Tailwind theme uses globally. Overriding
+  // individual CSS properties on an element appended to document.body isn't
+  // reliable — there are too many color-bearing properties (background-image
+  // gradients, outline-color, etc.) to cover one by one. Instead, render
+  // inside a same-origin iframe with its own blank document, so nothing from
+  // the host page's stylesheet — oklch or otherwise — is inherited at all.
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
   iframe.style.left = "-99999px";
@@ -366,6 +373,7 @@ async function renderHtmlToPdfBlob(html: string) {
 </style></head><body>${html}</body></html>`);
     frameDoc.close();
 
+    // Let layout settle before measuring/rendering.
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     const images = Array.from(frameDoc.images);
@@ -420,6 +428,7 @@ async function renderHtmlToPdfBlob(html: string) {
     document.body.removeChild(iframe);
   }
 }
+
 
 async function createWorkbook(rows: Array<{ page: number; text: string }>) {
   const zip = new JSZip();
@@ -543,86 +552,11 @@ export function ExtractImagesTool() {
 export function ScanToPdfTool() {
   return (
     <ImagesToPdfCaptureTool
-      accept={{ "image/*": [] }}
-      hint="Upload scans, camera photos, or any images. On mobile, choose your camera."
+      accept={{ "image/*": [".jpg", ".jpeg", ".png", ".webp"] }}
+      hint="Upload scans or camera photos. On mobile, choose your camera."
       filename="lazy-pdf-scan.pdf"
     />
   );
-}
-
-const MAX_IMAGE_DIMENSION = 6000; // clamp absurdly large images to avoid canvas/memory crashes
-
-type ProcessedImage = {
-  bytes: Uint8Array;
-  type: "png" | "jpg";
-  width: number;
-  height: number;
-};
-
-/** 
- * Converts any browser-decodable image (webp, gif, bmp, tiff, svg, heic where 
- * supported, etc.) into PNG or JPEG bytes pdf-lib can embed. PNG/JPEG files 
- * are passed through unchanged to avoid a needless re-encode. Uses 
- * createImageBitmap with EXIF-aware orientation where the browser supports it. 
- */
-async function processImageForPdf(file: File): Promise<ProcessedImage> {
-  const lower = file.name.toLowerCase();
-  const isPng = file.type === "image/png" || lower.endsWith(".png");
-  const isJpg =
-    file.type === "image/jpeg" ||
-    file.type === "image/jpg" ||
-    lower.endsWith(".jpg") ||
-    lower.endsWith(".jpeg");
-
-  // Fast path: already a directly-embeddable format.
-  if (isPng || isJpg) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    // Still need dimensions for page sizing; decode once cheaply.
-    const bitmap = await createImageBitmap(file).catch(() => null);
-    if (!bitmap) throw new Error(`Could not read "${file.name}" — the file may be corrupted.`);
-    const { width, height } = bitmap;
-    bitmap.close?.();
-    return { bytes, type: isPng ? "png" : "jpg", width, height };
-  }
-
-  // Everything else: decode via createImageBitmap (covers webp, gif, bmp, 
-  // most tiff, and heic/heif on browsers that support it) then re-encode.
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" } as ImageBitmapOptions);
-  } catch {
-    // Some browsers don't support imageOrientation option; retry without it.
-    try {
-      bitmap = await createImageBitmap(file);
-    } catch {
-      throw new Error(
-        `"${file.name}" is not a supported image format in this browser.`,
-      );
-    }
-  }
-
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
-  const targetW = Math.max(1, Math.round(bitmap.width * scale));
-  const targetH = Math.max(1, Math.round(bitmap.height * scale));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = targetW;
-  canvas.height = targetH;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas rendering is not available in this browser.");
-  ctx.drawImage(bitmap, 0, 0, targetW, targetH);
-  bitmap.close?.();
-
-  // PNG preserves transparency; use it unless the source is a photographic 
-  // format where PNG would bloat the file size unnecessarily.
-  const preferPng = file.type === "image/gif" || file.type === "image/bmp" || file.type === "image/webp";
-  const outType: "png" | "jpg" = preferPng ? "png" : "jpg";
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, outType === "png" ? "image/png" : "image/jpeg", 0.92),
-  );
-  if (!blob) throw new Error(`Could not convert "${file.name}".`);
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  return { bytes, type: outType, width: targetW, height: targetH };
 }
 
 function ImagesToPdfCaptureTool({
@@ -634,168 +568,42 @@ function ImagesToPdfCaptureTool({
   hint: string;
   filename: string;
 }) {
-  const [items, setItems] = useState<{ id: string; file: File; url: string }[]>([]);
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
-  const dragIndexRef = useState<{ current: number | null }>({ current: null })[0];
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      items.forEach((item) => URL.revokeObjectURL(item.url));
-    };
-  }, [items]);
-
-  function addFiles(newFiles: File[]) {
-    const mapped = newFiles.map((file) => ({
-      id: Math.random().toString(36).substring(7),
-      file,
-      url: URL.createObjectURL(file),
-    }));
-    setItems((current) => [...current, ...mapped]);
-  }
-
-  function moveUp(index: number) {
-    if (index === 0) return;
-    const next = [...items];
-    [next[index - 1], next[index]] = [next[index], next[index - 1]];
-    setItems(next);
-  }
-
-  function moveDown(index: number) {
-    if (index === items.length - 1) return;
-    const next = [...items];
-    [next[index], next[index + 1]] = [next[index + 1], next[index]];
-    setItems(next);
-  }
-
-  function remove(index: number) {
-    URL.revokeObjectURL(items[index].url);
-    setItems(items.filter((_, i) => i !== index));
-  }
-
-  function onDragStart(index: number) {
-    dragIndexRef.current = index;
-  }
-  function onDragOver(index: number, e: React.DragEvent) {
-    e.preventDefault();
-    setDragOverIndex(index);
-  }
-  function onDrop(index: number) {
-    const from = dragIndexRef.current;
-    setDragOverIndex(null);
-    dragIndexRef.current = null;
-    if (from === null || from === index) return;
-    setItems((current) => {
-      const next = [...current];
-      const [moved] = next.splice(from, 1);
-      next.splice(index, 0, moved);
-      return next;
-    });
-  }
-
   async function run() {
-    if (!items.length) return;
+    if (!files.length) return;
     setBusy(true);
-    const failures: string[] = [];
     try {
       const doc = await PDFDocument.create();
-      let addedAny = false;
-
-      for (const item of items) {
-        try {
-          if (item.file.size > 60 * 1024 * 1024) {
-            throw new Error(`"${item.file.name}" is too large to process (over 60 MB).`);
-          }
-          const processed = await processImageForPdf(item.file);
-          const image =
-            processed.type === "png"
-              ? await doc.embedPng(processed.bytes)
-              : await doc.embedJpg(processed.bytes);
-          const page = doc.addPage([image.width, image.height]);
-          page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
-          addedAny = true;
-        } catch (err) {
-          failures.push(err instanceof Error ? err.message : `Could not process "${item.file.name}".`);
-        }
+      for (const file of files) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const isPng = file.type.includes("png") || file.name.toLowerCase().endsWith(".png");
+        const image = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+        const page = doc.addPage([image.width, image.height]);
+        page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
       }
-
-      if (!addedAny) {
-        toast.error("None of the selected images could be processed.");
-        return;
-      }
-
       downloadBlob(await doc.save(), filename);
-      if (failures.length) {
-        toast.warning(`PDF created, but ${failures.length} image${failures.length > 1 ? "s" : ""} were skipped: ${failures.join(" ")}`);
-      } else {
-        toast.success("PDF ready.");
-      }
+      toast.success("PDF ready.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "PDF generation failed. Please try again.");
+      toast.error(error instanceof Error ? error.message : "Could not build PDF.");
     } finally {
       setBusy(false);
     }
   }
-
   return (
     <div className="space-y-6">
-      <DropZone onFiles={addFiles} accept={accept} hint={hint} multiple />
-
-      {items.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-          <div className="text-sm font-medium text-muted-foreground mb-1 flex flex-wrap justify-between items-center gap-1">
-            <span>{items.length} image{items.length > 1 ? "s" : ""} selected</span>
-            <span className="text-xs">Drag to change their PDF page order</span>
-          </div>
-
-          <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
-            {items.map((item, i) => (
-              <div
-                key={item.id}
-                draggable
-                onDragStart={() => onDragStart(i)}
-                onDragOver={(e) => onDragOver(i, e)}
-                onDrop={() => onDrop(i)}
-                onDragEnd={() => setDragOverIndex(null)}
-                className={`flex items-center gap-2 sm:gap-3 bg-secondary/30 border border-border p-2 rounded-lg transition-colors hover:bg-secondary/50 cursor-move ${dragOverIndex === i ? "border-primary ring-1 ring-primary" : ""}`}
-              >
-                <span className="w-5 shrink-0 text-center text-xs font-semibold text-muted-foreground tabular-nums">
-                  {i + 1}
-                </span>
-                <img
-                  src={item.url}
-                  alt="thumbnail"
-                  className="w-12 h-12 sm:w-14 sm:h-14 object-cover rounded bg-white shadow-sm shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate text-sm font-medium text-foreground" title={item.file.name}>
-                    {item.file.name}
-                  </div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {(item.file.type || "unknown").split("/")[1]?.toUpperCase() ?? "FILE"} · {formatBytes(item.file.size)}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveUp(i)} disabled={i === 0} aria-label="Move up">
-                    <ChevronUp className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => moveDown(i)} disabled={i === items.length - 1} aria-label="Move down">
-                    <ChevronDown className="h-4 w-4" />
-                  </Button>
-                  <div className="w-px h-5 bg-border mx-0.5 hidden sm:block" />
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => remove(i)} aria-label="Remove image">
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+      <DropZone
+        onFiles={(newFiles) => setFiles((current) => [...current, ...newFiles])}
+        accept={accept}
+        hint={hint}
+      />
+      {files.length > 0 && (
+        <div className="rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground">
+          {files.length} image{files.length > 1 ? "s" : ""} selected
         </div>
       )}
-
       <div className="flex justify-end">
-        <Button variant="action" size="xl" onClick={run} disabled={!items.length || busy}>
+        <Button variant="action" size="xl" onClick={run} disabled={!files.length || busy}>
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create PDF
         </Button>
       </div>
@@ -1434,15 +1242,44 @@ export function WordToPdfTool() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   async function run() {
-    if (!file) return;
+    if (!file || busy) return;
+
+    if (file.size <= 0) {
+      toast.error("Please select a non-empty Word document.");
+      return;
+    }
+
+    const isWordDocument =
+      file.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      /\.docx$/i.test(file.name);
+
+    if (!isWordDocument) {
+      toast.error("Please select a valid .docx Word document.");
+      return;
+    }
+
     setBusy(true);
+
     try {
-      const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-      const pdfBlob = await renderHtmlToPdfBlob(result.value);
-      downloadBlob(pdfBlob, `lazy-pdf-${file.name.replace(/\.docx?$/i, "")}.pdf`, "application/pdf");
-      toast.success("Word converted.");
+      const pdfBlob = await renderWordToRealTextPdf(file);
+
+      if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
+        throw new Error("The Word document did not produce a valid PDF.");
+      }
+
+      const baseName = file.name.replace(/\.docx?$/i, "").trim() || "document";
+      const outputName = `lazy-pdf-${baseName}.pdf`;
+
+      downloadBlob(pdfBlob, outputName, "application/pdf");
+      toast.success("Word converted to PDF.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Word conversion failed.");
+      console.error("Word to PDF conversion failed:", error);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Word to PDF conversion failed.",
+      );
     } finally {
       setBusy(false);
     }
