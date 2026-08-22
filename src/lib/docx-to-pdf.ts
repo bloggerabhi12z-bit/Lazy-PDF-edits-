@@ -93,12 +93,11 @@ function toWinAnsiSafeText(value: string): string {
     .replace(/[\u2013\u2014\u2212]/g, "-")
     .replace(/\u2026/g, "...")
     .replace(/[\u25CF\u25AA\u25A0\u00B7]/g, "\u2022")
-    .replace(/[\u00B9\u00B2\u00B3]/g, (character) => ({ "¹": "1", "²": "2", "³": "3" }[character] ?? character))
-    .replace(/[\u200B]/g, "") // Remove zero-width spaces
-    .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ") // Convert non-breaking & advanced Unicode spaces to standard space
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036F]/g, "")
-    // Expanded range to \xFF to include standard European accents (é, ñ, ç, etc.)
+    .replace(/[\u00B9\u00B2\u00B3]/g, (character) => (
+      { "¹": "1", "²": "2", "³": "3" }[character] ?? character
+    ))
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")
+    .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ")
     .replace(/[^\x20-\xFF\u2022\t\n\f]/g, "?");
 }
 
@@ -397,7 +396,7 @@ function parseRun(runNode: Element, inherited: RunStyle): TextRun[] {
         break;
       }
       case "tab":
-      case "ptab": 
+      case "ptab":
         // Maintain exact tab characters so wrapParagraphLines can enforce a fixed column jump
         result.push({ text: "\t", style });
         break;
@@ -635,210 +634,369 @@ function parseSection(sectPr: Element | null): PageSection {
 
 
 function splitRunOnWhitespace(run: TextRun): TextRun[] {
-  // We keep \t in the regex so tabs are preserved as chunks
-  const pieces = run.text.split(/(\s+)/).filter((piece) => piece.length > 0);
-  return pieces.map((text) => ({ text, style: { ...run.style } }));
+  const matches = run.text.match(/\f|\n|\t|[^\s]+|[ ]+/g) ?? [];
+  return matches
+    .filter((text) => text.length > 0)
+    .map((text) => ({ text, style: { ...run.style } }));
+}
+
+type WrappedLine = {
+  runs: TextRun[];
+  width: number;
+  isFirstLine: boolean;
+  pageBreakBefore?: boolean;
+};
+
+function getParagraphLineHeight(paragraph: ParagraphModel): number {
+  const headingScale = paragraph.headingLevel
+    ? Math.max(1, 1.12 - (paragraph.headingLevel - 1) * 0.03)
+    : 1;
+  return Math.max(1, paragraph.lineHeight * headingScale);
+}
+
+function getLineAvailableWidth(
+  paragraph: ParagraphModel,
+  contentWidth: number,
+  lineIndex: number,
+): number {
+  const firstLineOffset = lineIndex === 0
+    ? paragraph.firstLineIndent - paragraph.hangingIndent
+    : paragraph.hangingIndent > 0
+      ? -paragraph.hangingIndent
+      : 0;
+
+  return Math.max(
+    20,
+    contentWidth - paragraph.leftIndent - paragraph.rightIndent - firstLineOffset,
+  );
+}
+
+function measureTextWithTabs(
+  text: string,
+  style: RunStyle,
+  currentWidth: number,
+  fonts: Record<FontFace, PDFFont>,
+): number {
+  const font = resolvePdfFont(style, fonts);
+  const parts = text.split("\t");
+  let width = 0;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    if (index > 0) {
+      const tabStop = 36;
+      const absolutePosition = currentWidth + width;
+      const remainder = absolutePosition % tabStop;
+      width += remainder === 0 ? tabStop : tabStop - remainder;
+    }
+
+    const part = parts[index];
+    if (part) {
+      width += font.widthOfTextAtSize(part, style.fontSize);
+    }
+  }
+
+  return width;
+}
+
+function breakLongToken(
+  text: string,
+  style: RunStyle,
+  availableWidth: number,
+  fonts: Record<FontFace, PDFFont>,
+): TextRun[] {
+  const safeText = toWinAnsiSafeText(text);
+  const font = resolvePdfFont(style, fonts);
+  const result: TextRun[] = [];
+  let current = "";
+
+  for (const character of safeText) {
+    const candidate = current + character;
+
+    if (
+      current &&
+      font.widthOfTextAtSize(candidate, style.fontSize) > availableWidth
+    ) {
+      result.push({ text: current, style: { ...style } });
+      current = character;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) {
+    result.push({ text: current, style: { ...style } });
+  }
+
+  return result;
 }
 
 function wrapParagraphLines(
   paragraph: ParagraphModel,
   contentWidth: number,
   fonts: Record<FontFace, PDFFont>,
-): Array<{ runs: TextRun[]; width: number; isFirstLine: boolean; pageBreakBefore?: boolean }> {
+): WrappedLine[] {
   const pieces: TextRun[] = [];
+
   for (const run of paragraph.runs) {
-    const chunks = splitRunOnWhitespace(run);
-    for (const chunk of chunks) {
-      if (chunk.text.includes("\n") || chunk.text.includes("\f")) {
-        const parts = chunk.text.split(/([\n\f])/);
-        for (const part of parts) {
-          if (part) pieces.push({ text: part, style: { ...chunk.style } });
-        }
-      } else {
-        pieces.push(chunk);
-      }
-    }
+    pieces.push(...splitRunOnWhitespace(run));
   }
 
-  const lines: Array<{ runs: TextRun[]; width: number; isFirstLine: boolean; pageBreakBefore?: boolean }> = [];
+  const lines: WrappedLine[] = [];
   let current: TextRun[] = [];
-  let width = 0;
+  let currentWidth = 0;
   let lineIndex = 0;
   let pendingPageBreak = false;
-  const bulletPrefix = paragraph.bullet ?? paragraph.number;
-  const prefix = bulletPrefix ? `${toWinAnsiSafeText(bulletPrefix)} ` : "";
 
-  if (prefix) {
-    current.push({
-      text: prefix,
-      style: { ...pieces[0]?.style ?? paragraph.runs[0].style, bold: false },
-    });
-    width = resolvePdfFont(current[0].style, fonts).widthOfTextAtSize(
-      prefix,
-      current[0].style.fontSize,
-    );
-  }
+  const baseStyle =
+    paragraph.runs[0]?.style ?? {
+      bold: false,
+      italic: false,
+      underline: false,
+      fontSize: 11,
+      color: rgb(0, 0, 0),
+    };
+
+  const bulletPrefix = paragraph.bullet ?? paragraph.number;
+  const prefix = bulletPrefix
+    ? `${toWinAnsiSafeText(bulletPrefix)} `
+    : "";
 
   const flush = (force = false) => {
-    if (current.length === 0 && !force) return;
+    if (!force && current.length === 0) return;
+
     if (current.length === 0) {
-      current.push({ text: "", style: { ...paragraph.runs[0].style } });
+      current = [{ text: "", style: { ...baseStyle } }];
     }
+
     lines.push({
       runs: current,
-      width,
+      width: currentWidth,
       isFirstLine: lineIndex === 0,
       pageBreakBefore: pendingPageBreak,
     });
-    pendingPageBreak = false;
+
     current = [];
-    width = 0;
+    currentWidth = 0;
     lineIndex += 1;
+    pendingPageBreak = false;
   };
 
-  for (const piece of pieces) {
-    if (piece.text === "\n") {
-      flush(true);
-      continue;
-    }
+  if (prefix) {
+    const prefixStyle = { ...baseStyle, bold: false };
+    current.push({ text: prefix, style: prefixStyle });
+    currentWidth = measureTextWithTabs(prefix, prefixStyle, 0, fonts);
+  }
 
+  for (const piece of pieces) {
     if (piece.text === "\f") {
       flush(true);
       pendingPageBreak = true;
       continue;
     }
 
-    const safePieceText = toWinAnsiSafeText(piece.text);
-    if (!safePieceText) continue;
-
-    const safePiece = { text: safePieceText, style: piece.style };
-    const font = resolvePdfFont(safePiece.style, fonts);
-    let textWidth = 0;
-
-    if (safePieceText.includes("\t")) {
-      const parts = safePieceText.split("\t");
-      for (let index = 0; index < parts.length; index += 1) {
-        if (index > 0) {
-          const tabStop = 40;
-          const remainder = (width + textWidth) % tabStop;
-          textWidth += remainder === 0 ? tabStop : tabStop - remainder;
-        }
-        if (parts[index]) {
-          textWidth += font.widthOfTextAtSize(parts[index], safePiece.style.fontSize);
-        }
-      }
-    } else {
-      textWidth = font.widthOfTextAtSize(safePiece.text, safePiece.style.fontSize);
+    if (piece.text === "\n") {
+      flush(true);
+      continue;
     }
 
-    const available = Math.max(
-      20,
-      contentWidth -
-        (lineIndex === 0
-          ? Math.max(0, paragraph.firstLineIndent - paragraph.hangingIndent)
-          : 0),
+    const safeText = toWinAnsiSafeText(piece.text);
+    if (!safeText) continue;
+
+    const safePiece: TextRun = {
+      text: safeText,
+      style: { ...piece.style },
+    };
+
+    const isWhitespace = /^\s+$/.test(safePiece.text);
+    const availableWidth = getLineAvailableWidth(
+      paragraph,
+      contentWidth,
+      lineIndex,
+    );
+    const pieceWidth = measureTextWithTabs(
+      safePiece.text,
+      safePiece.style,
+      currentWidth,
+      fonts,
     );
 
-    if (piece.text.trim() && width > 0 && width + textWidth > available) {
+    if (
+      !isWhitespace &&
+      currentWidth > 0 &&
+      currentWidth + pieceWidth > availableWidth
+    ) {
       flush();
     }
 
-    // A single unbreakable token must never overflow the content area.
-    if (piece.text.trim() && width === 0 && textWidth > available && !safePieceText.includes("\t")) {
-      let token = "";
-      for (const character of safePieceText) {
-        const candidate = token + character;
-        if (font.widthOfTextAtSize(candidate, safePiece.style.fontSize) > available && token) {
-          current.push({ text: token, style: { ...safePiece.style } });
-          width = font.widthOfTextAtSize(token, safePiece.style.fontSize);
+    const availableAfterFlush = getLineAvailableWidth(
+      paragraph,
+      contentWidth,
+      lineIndex,
+    );
+
+    if (
+      !isWhitespace &&
+      currentWidth === 0 &&
+      pieceWidth > availableAfterFlush &&
+      !safePiece.text.includes("\t")
+    ) {
+      const brokenRuns = breakLongToken(
+        safePiece.text,
+        safePiece.style,
+        availableAfterFlush,
+        fonts,
+      );
+
+      for (const brokenRun of brokenRuns) {
+        const brokenWidth = resolvePdfFont(
+          brokenRun.style,
+          fonts,
+        ).widthOfTextAtSize(
+          brokenRun.text,
+          brokenRun.style.fontSize,
+        );
+
+        if (
+          currentWidth > 0 &&
+          currentWidth + brokenWidth > availableAfterFlush
+        ) {
           flush();
-          token = character;
-        } else {
-          token = candidate;
+        }
+
+        current.push(brokenRun);
+        currentWidth += brokenWidth;
+
+        if (
+          currentWidth >= availableAfterFlush &&
+          brokenRun.text !== brokenRuns[brokenRuns.length - 1].text
+        ) {
+          flush();
         }
       }
-      if (token) {
-        current.push({ text: token, style: { ...safePiece.style } });
-        width = font.widthOfTextAtSize(token, safePiece.style.fontSize);
-      }
+
+      continue;
+    }
+
+    if (isWhitespace && current.length === 0) {
       continue;
     }
 
     current.push(safePiece);
-    width += textWidth;
+    currentWidth += measureTextWithTabs(
+      safePiece.text,
+      safePiece.style,
+      currentWidth,
+      fonts,
+    );
   }
 
-  if (current.length > 0 || lines.length === 0) flush(true);
+  if (current.length > 0 || lines.length === 0) {
+    flush(true);
+  }
+
   return lines;
 }
 
 function drawTextRunLine(
   page: PDFPage,
-  line: { runs: TextRun[]; width: number; isFirstLine: boolean; pageBreakBefore?: boolean },
+  line: WrappedLine,
   paragraph: ParagraphModel,
   x: number,
   y: number,
   contentWidth: number,
   fonts: Record<FontFace, PDFFont>,
+  isLastLine: boolean,
 ): void {
-  if (line.pageBreakBefore) {
-    // Pagination is handled by drawParagraph; this marker is intentionally
-    // carried by the line model so an inline Word page break is exact.
-  }
-
   const indent = line.isFirstLine
     ? paragraph.firstLineIndent - paragraph.hangingIndent
     : paragraph.hangingIndent > 0
       ? -paragraph.hangingIndent
       : 0;
-  const startX = x + paragraph.leftIndent + indent;
-  let cursorX = startX;
 
-  const textRuns = line.runs;
-  const isJustified = paragraph.alignment === "justify" && textRuns.some((run) => /\s/.test(run.text)) && !line.runs.some((run) => run.text.endsWith("\n"));
-  const whitespaceCount = isJustified
-    ? textRuns.reduce((count, run) => count + (run.text.match(/ /g) ?? []).length, 0)
+  let cursorX = x + paragraph.leftIndent + indent;
+  const maxWidth = contentWidth - paragraph.leftIndent - paragraph.rightIndent;
+
+  const shouldJustify =
+    paragraph.alignment === "justify" &&
+    !isLastLine &&
+    line.runs.some((run) => /[ ]/.test(run.text));
+
+  const totalSpaces = shouldJustify
+    ? line.runs.reduce(
+        (count, run) => count + (run.text.match(/ /g)?.length ?? 0),
+        0,
+      )
     : 0;
-  const extraSpace = isJustified && whitespaceCount > 0 ? Math.max(0, contentWidth - paragraph.leftIndent - paragraph.rightIndent - line.width) / whitespaceCount : 0;
 
-  for (const run of textRuns) {
+  const extraSpace =
+    shouldJustify && totalSpaces > 0
+      ? Math.max(0, maxWidth - line.width) / totalSpaces
+      : 0;
+
+  for (const run of line.runs) {
     const font = resolvePdfFont(run.style, fonts);
-    const text = run.text.replace(/[\f\n]/g, " ");
-    if (!text) continue;
+    const safeText = toWinAnsiSafeText(run.text);
 
-    const pieces = isJustified ? text.split(/( +)/) : [text];
-    for (const piece of pieces) {
-      if (!piece) continue;
-      const safePiece = toWinAnsiSafeText(piece);
-      
-      if (safePiece.includes("\t")) {
-        const tabCount = (safePiece.match(/\t/g) || []).length;
-        cursorX += tabCount * 40; // Hard tab advance
-        const spacesOnly = safePiece.replace(/\t/g, "");
-        if (spacesOnly.length > 0) {
-          cursorX += font.widthOfTextAtSize(spacesOnly, run.style.fontSize);
-        }
-      } else {
-        const width = font.widthOfTextAtSize(safePiece, run.style.fontSize);
-        page.drawText(safePiece, {
+    if (!safeText) continue;
+
+    const segments = safeText.split(/(\t| +)/);
+
+    for (const segment of segments) {
+      if (!segment) continue;
+
+      if (segment === "\t") {
+        const tabStop = 36;
+        const remainder = cursorX % tabStop;
+        cursorX += remainder === 0 ? tabStop : tabStop - remainder;
+        continue;
+      }
+
+      if (/^ +$/.test(segment)) {
+        // Draw an actual space glyph so the PDF content stream contains
+        // a real space character between words. The previous version
+        // only advanced cursorX without drawing anything, so no space
+        // ever existed in the text layer — copy/paste or extraction
+        // merged adjacent words (e.g. "strategy,operations").
+        page.drawText(segment, {
           x: cursorX,
           y,
           size: run.style.fontSize,
           font,
           color: run.style.color,
         });
-        if (run.style.underline) {
-          page.drawLine({
-            start: { x: cursorX, y: y - 1.5 },
-            end: { x: cursorX + width, y: y - 1.5 },
-            thickness: Math.max(0.4, run.style.fontSize / 18),
-            color: run.style.color,
-          });
-        }
-        cursorX += width;
+        const spaceWidth = font.widthOfTextAtSize(
+          " ",
+          run.style.fontSize,
+        );
+        cursorX +=
+          spaceWidth * segment.length +
+          extraSpace * segment.length;
+        continue;
       }
-      
-      if (/^ +$/.test(piece)) cursorX += extraSpace;
+
+      const width = font.widthOfTextAtSize(
+        segment,
+        run.style.fontSize,
+      );
+
+      page.drawText(segment, {
+        x: cursorX,
+        y,
+        size: run.style.fontSize,
+        font,
+        color: run.style.color,
+      });
+
+      if (run.style.underline) {
+        page.drawLine({
+          start: { x: cursorX, y: y - 1.5 },
+          end: { x: cursorX + width, y: y - 1.5 },
+          thickness: Math.max(0.4, run.style.fontSize / 18),
+          color: run.style.color,
+        });
+      }
+
+      cursorX += width;
     }
   }
 }
@@ -849,10 +1007,9 @@ function drawParagraph(
   x: number,
   contentWidth: number,
   fonts: Record<FontFace, PDFFont>,
-  lines: Array<{ runs: TextRun[]; width: number; isFirstLine: boolean; pageBreakBefore?: boolean }>,
+  lines: WrappedLine[],
 ): void {
-  const headingScale = paragraph.headingLevel ? Math.max(1, 1.12 - (paragraph.headingLevel - 1) * 0.03) : 1;
-  const effectiveLineHeight = paragraph.lineHeight * headingScale;
+  const lineHeight = getParagraphLineHeight(paragraph);
 
   if (paragraph.pageBreakBefore) {
     ctx.addPage();
@@ -860,31 +1017,83 @@ function drawParagraph(
     ctx.cursorY -= paragraph.beforeSpacing;
   }
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
     if (line.pageBreakBefore) {
       ctx.addPage();
     }
-    if (ctx.cursorY - effectiveLineHeight < ctx.bottomLimit) {
+
+    if (ctx.cursorY - lineHeight < ctx.bottomLimit) {
       ctx.addPage();
     }
-    drawTextRunLine(ctx.page, line, paragraph, x, ctx.cursorY, contentWidth, fonts);
-    ctx.cursorY -= effectiveLineHeight;
+
+    drawTextRunLine(
+      ctx.page,
+      line,
+      paragraph,
+      x,
+      ctx.cursorY,
+      contentWidth,
+      fonts,
+      index === lines.length - 1,
+    );
+
+    ctx.cursorY -= lineHeight;
   }
 
   if (paragraph.bottomBorder) {
-    const borderY = ctx.cursorY + effectiveLineHeight * 0.35;
+    const borderY = ctx.cursorY + Math.min(
+      lineHeight * 0.25,
+      Math.max(1, paragraph.bottomBorder.space),
+    );
+
     if (borderY < ctx.bottomLimit) {
       ctx.addPage();
     }
+
     ctx.page.drawLine({
-      start: { x: x + paragraph.leftIndent, y: borderY },
-      end: { x: x + contentWidth - paragraph.rightIndent, y: borderY },
+      start: {
+        x: x + paragraph.leftIndent,
+        y: borderY,
+      },
+      end: {
+        x: x + contentWidth - paragraph.rightIndent,
+        y: borderY,
+      },
       thickness: paragraph.bottomBorder.width,
       color: paragraph.bottomBorder.color,
     });
   }
 
   ctx.cursorY -= paragraph.afterSpacing;
+}
+
+function measureTableCellHeight(
+  cell: TableCell,
+  cellWidth: number,
+  fonts: Record<FontFace, PDFFont>,
+): number {
+  const horizontalPadding = 10;
+  const availableWidth = Math.max(20, cellWidth - horizontalPadding);
+  let height = 10;
+
+  for (const paragraph of cell.paragraphs) {
+    const lines = wrapParagraphLines(
+      paragraph,
+      Math.max(
+        20,
+        availableWidth - paragraph.leftIndent - paragraph.rightIndent,
+      ),
+      fonts,
+    );
+
+    height += paragraph.beforeSpacing;
+    height += Math.max(1, lines.length) * getParagraphLineHeight(paragraph);
+    height += paragraph.afterSpacing;
+  }
+
+  return Math.max(24, height + 10);
 }
 
 function drawTable(
@@ -894,71 +1103,122 @@ function drawTable(
   contentWidth: number,
   fonts: Record<FontFace, PDFFont>,
 ): void {
-  const columnCount = Math.max(table.columnWidths.length, ...table.rows.map((row) => row.cells.length), 1);
-  const explicitWidths = table.columnWidths.length === columnCount ? table.columnWidths : [];
-  const totalExplicit = explicitWidths.reduce((sum, value) => sum + value, 0);
-  const widths = explicitWidths.length === columnCount && totalExplicit > 0
-    ? explicitWidths.map((value) => (value / totalExplicit) * contentWidth)
-    : Array.from({ length: columnCount }, () => contentWidth / columnCount);
+  const columnCount = Math.max(
+    table.columnWidths.length,
+    ...table.rows.map((row) => row.cells.length),
+    1,
+  );
+
+  const explicitWidths =
+    table.columnWidths.length === columnCount
+      ? table.columnWidths
+      : [];
+
+  const totalExplicitWidth = explicitWidths.reduce(
+    (sum, value) => sum + Math.max(0, value),
+    0,
+  );
+
+  const widths =
+    explicitWidths.length === columnCount &&
+    totalExplicitWidth > 0
+      ? explicitWidths.map(
+          (value) =>
+            (Math.max(0, value) / totalExplicitWidth) *
+            contentWidth,
+        )
+      : Array.from(
+          { length: columnCount },
+          () => contentWidth / columnCount,
+        );
 
   for (const row of table.rows) {
-    const cellHeights: number[] = [];
-    for (const cell of row.cells) {
-      const cellWidth = widths[cellHeights.length] ?? widths[widths.length - 1];
-      const availableWidth = Math.max(1, cellWidth - 10);
-      let measuredHeight = 10;
+    const cellHeights = row.cells.map((cell, index) =>
+      measureTableCellHeight(
+        cell,
+        widths[index] ?? widths[widths.length - 1],
+        fonts,
+      ),
+    );
 
-      for (const paragraph of cell.paragraphs) {
-        const lines = wrapParagraphLines(paragraph, availableWidth, fonts);
-        const headingScale = paragraph.headingLevel
-          ? Math.max(1, 1.12 - (paragraph.headingLevel - 1) * 0.03)
-          : 1;
-        const lineHeight = paragraph.lineHeight * headingScale;
-        measuredHeight += paragraph.beforeSpacing + lines.length * lineHeight + paragraph.afterSpacing;
-      }
-
-      cellHeights.push(Math.max(24, measuredHeight + 10));
-    }
     const rowHeight = Math.max(24, ...cellHeights);
 
     if (ctx.cursorY - rowHeight < ctx.bottomLimit) {
       ctx.addPage();
     }
 
+    const rowTopY = ctx.cursorY;
     let cursorX = x;
-    const rowStartY = ctx.cursorY;
-    
+
     row.cells.forEach((cell, index) => {
-      const cellWidth = widths[index] ?? widths[widths.length - 1];
+      const cellWidth =
+        widths[index] ?? widths[widths.length - 1];
+
       ctx.page.drawRectangle({
         x: cursorX,
-        y: rowStartY - rowHeight,
+        y: rowTopY - rowHeight,
         width: cellWidth,
         height: rowHeight,
         borderWidth: 0.5,
         borderColor: rgb(0.75, 0.75, 0.75),
       });
 
-      let cellY = rowStartY - 12;
+      let cellY = rowTopY - 12;
+
       for (const paragraph of cell.paragraphs) {
-        const availableWidth = Math.max(1, cellWidth - 10 - paragraph.leftIndent - paragraph.rightIndent);
-        const paragraphLines = wrapParagraphLines(paragraph, availableWidth, fonts);
-        
-        const headingScale = paragraph.headingLevel ? Math.max(1, 1.12 - (paragraph.headingLevel - 1) * 0.03) : 1;
-        const effectiveLineHeight = paragraph.lineHeight * headingScale;
+        const availableWidth = Math.max(
+          20,
+          cellWidth -
+            10 -
+            paragraph.leftIndent -
+            paragraph.rightIndent,
+        );
+
+        const paragraphLines = wrapParagraphLines(
+          paragraph,
+          availableWidth,
+          fonts,
+        );
+
+        const lineHeight = getParagraphLineHeight(paragraph);
 
         cellY -= paragraph.beforeSpacing;
-        for (const line of paragraphLines) {
-          if (cellY < rowStartY - rowHeight + 5) break; 
-          drawTextRunLine(ctx.page, line, paragraph, cursorX + 5, cellY, cellWidth - 10, fonts);
-          cellY -= effectiveLineHeight;
+
+        for (let lineIndex = 0; lineIndex < paragraphLines.length; lineIndex += 1) {
+          const line = paragraphLines[lineIndex];
+
+          if (line.pageBreakBefore) {
+            continue;
+          }
+
+          if (
+            cellY - lineHeight <
+            rowTopY - rowHeight + 5
+          ) {
+            break;
+          }
+
+          drawTextRunLine(
+            ctx.page,
+            line,
+            paragraph,
+            cursorX + 5,
+            cellY,
+            cellWidth - 10,
+            fonts,
+            lineIndex === paragraphLines.length - 1,
+          );
+
+          cellY -= lineHeight;
         }
+
         cellY -= paragraph.afterSpacing;
       }
+
       cursorX += cellWidth;
     });
 
-    ctx.cursorY -= rowHeight;
+    ctx.cursorY = rowTopY - rowHeight;
   }
 }
 
@@ -1025,57 +1285,93 @@ export async function renderWordToRealTextPdf(file: File): Promise<Blob> {
 
     if (block.type === "paragraph") {
       const paragraph = block.value;
+      const availableWidth = Math.max(
+        20,
+        contentWidth - paragraph.leftIndent - paragraph.rightIndent,
+      );
+
       const lines = wrapParagraphLines(
         paragraph,
-        contentWidth - paragraph.leftIndent - paragraph.rightIndent,
+        availableWidth,
         fonts,
       );
 
       if (paragraph.keepWithNext) {
-        let requiredHeight = paragraph.beforeSpacing + lines.length * paragraph.lineHeight + paragraph.afterSpacing;
+        let requiredHeight =
+          paragraph.beforeSpacing +
+          lines.length * getParagraphLineHeight(paragraph) +
+          paragraph.afterSpacing;
+
         let nextIndex = blockIndex + 1;
 
         while (nextIndex < blocks.length) {
           const nextBlock = blocks[nextIndex];
-          if (nextBlock.type !== "paragraph" || !nextBlock.value.keepWithNext) {
-            if (nextBlock.type === "paragraph") {
-              const nextLines = wrapParagraphLines(
-                nextBlock.value,
-                contentWidth - nextBlock.value.leftIndent - nextBlock.value.rightIndent,
-                fonts,
-              );
-              requiredHeight +=
-                nextBlock.value.beforeSpacing +
-                nextLines.length * nextBlock.value.lineHeight +
-                nextBlock.value.afterSpacing;
-            }
+
+          if (nextBlock.type !== "paragraph") {
             break;
           }
+
+          const nextParagraph = nextBlock.value;
           const nextLines = wrapParagraphLines(
-            nextBlock.value,
-            contentWidth - nextBlock.value.leftIndent - nextBlock.value.rightIndent,
+            nextParagraph,
+            Math.max(
+              20,
+              contentWidth -
+                nextParagraph.leftIndent -
+                nextParagraph.rightIndent,
+            ),
             fonts,
           );
+
           requiredHeight +=
-            nextBlock.value.beforeSpacing +
-            nextLines.length * nextBlock.value.lineHeight +
-            nextBlock.value.afterSpacing;
+            nextParagraph.beforeSpacing +
+            nextLines.length *
+              getParagraphLineHeight(nextParagraph) +
+            nextParagraph.afterSpacing;
+
+          if (!nextParagraph.keepWithNext) {
+            break;
+          }
+
           nextIndex += 1;
         }
 
-        if (ctx.cursorY - requiredHeight < ctx.bottomLimit) {
+        if (
+          ctx.cursorY - requiredHeight <
+          ctx.bottomLimit
+        ) {
           ctx.addPage();
         }
       }
 
-      drawParagraph(ctx, paragraph, section.marginLeft, contentWidth, fonts, lines);
+      drawParagraph(
+        ctx,
+        paragraph,
+        section.marginLeft,
+        contentWidth,
+        fonts,
+        lines,
+      );
     } else {
-      drawTable(ctx, block.value, section.marginLeft, contentWidth, fonts);
+      drawTable(
+        ctx,
+        block.value,
+        section.marginLeft,
+        contentWidth,
+        fonts,
+      );
     }
   }
 
+
     const bytes = await pdf.save({ useObjectStreams: true });
-    return new Blob([bytes], { type: "application/pdf" });
+
+const pdfBuffer = new ArrayBuffer(bytes.byteLength);
+new Uint8Array(pdfBuffer).set(bytes);
+
+return new Blob([pdfBuffer], {
+  type: "application/pdf",
+});
   } catch (error) {
     if (error instanceof Error && error.message) {
       throw error;
