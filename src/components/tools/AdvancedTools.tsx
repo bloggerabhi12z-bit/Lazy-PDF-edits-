@@ -1263,7 +1263,14 @@ export function WordToPdfTool() {
     setBusy(true);
 
     try {
-      const pdfBlob = await renderWordToRealTextPdf(file);
+      let pdfBlob: Blob;
+
+try {
+  pdfBlob = await convertWordToPdfWithWasm(file);
+} catch (wasmError) {
+  console.warn("docx-to-pdf-wasm unavailable, falling back to pdf-lib renderer:", wasmError);
+  pdfBlob = await renderWordToRealTextPdf(file);
+}
 
       if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
         throw new Error("The Word document did not produce a valid PDF.");
