@@ -1,3 +1,4 @@
+import { convertWordToPdfWithWasm } from "@/lib/docx-to-pdf-wasm-adapter";
 import { useEffect, useMemo, useState } from "react";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import JSZip from "jszip";
