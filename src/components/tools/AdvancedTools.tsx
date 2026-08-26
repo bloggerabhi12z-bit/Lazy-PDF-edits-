@@ -1265,12 +1265,20 @@ export function WordToPdfTool() {
     try {
       let pdfBlob: Blob;
 
-try {
-  pdfBlob = await convertWordToPdfWithWasm(file);
-} catch (wasmError) {
-  console.warn("docx-to-pdf-wasm unavailable, falling back to pdf-lib renderer:", wasmError);
-  pdfBlob = await renderWordToRealTextPdf(file);
-}
+      // The pdf-lib renderer parses the real DOCX structure (styles,
+      // numbering, indentation, tables, page breaks, etc.) and is the
+      // primary path. `docx-to-pdf-wasm` is a single-author, unaudited
+      // v0.1.0 package with no track record for layout fidelity, so it's
+      // only used as a last-resort fallback if the primary renderer throws.
+      try {
+        pdfBlob = await renderWordToRealTextPdf(file);
+      } catch (primaryError) {
+        console.warn(
+          "pdf-lib Word renderer failed, falling back to docx-to-pdf-wasm:",
+          primaryError,
+        );
+        pdfBlob = await convertWordToPdfWithWasm(file);
+      }
 
       if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
         throw new Error("The Word document did not produce a valid PDF.");
