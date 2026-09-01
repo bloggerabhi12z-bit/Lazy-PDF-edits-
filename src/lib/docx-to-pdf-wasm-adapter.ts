@@ -14,8 +14,9 @@ type WasmModule = WebAssembly.Module;
 let cachedModulePromise: Promise<WasmModule> | undefined;
 
 function isWasmWordToPdfEnabled(): boolean {
-  const flag = import.meta.env.VITE_ENABLE_WASM_WORD_TO_PDF as string | undefined;
-  return flag !== "false";
+  // Disabled: strips Word numbering (bullets) and ignores custom tab stops
+  // (w:tabs, right-aligned tabs). Re-enable once upstream fixes land.
+  return false;
 }
 
 async function getWasmModule(): Promise<WasmModule> {

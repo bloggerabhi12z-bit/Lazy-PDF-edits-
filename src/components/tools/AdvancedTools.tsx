@@ -1,4 +1,3 @@
-import { convertWordToPdfWithWasm } from "@/lib/docx-to-pdf-wasm-adapter";
 import { useEffect, useMemo, useState } from "react";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import JSZip from "jszip";
@@ -15,7 +14,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
 import { createTextPdf, stripHtml } from "@/lib/text-pdf";
-import { renderWordToRealTextPdf } from "@/lib/docx-to-pdf";
 import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1242,17 +1240,25 @@ export function OcrPdfTool() {
 export function WordToPdfTool() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState<"idle" | "uploading" | "converting" | "done" | "error">("idle");
+
   async function run() {
     if (!file || busy) return;
 
-    if (file.size <= 0) {
+    // Validation
+    if (file.size === 0) {
       toast.error("Please select a non-empty Word document.");
       return;
     }
 
+    if (file.size > 50 * 1024 * 1024) {
+      toast.error("File size exceeds 50 MB limit.");
+      return;
+    }
+
     const isWordDocument =
-      file.type ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
       /\.docx$/i.test(file.name);
 
     if (!isWordDocument) {
@@ -1261,45 +1267,100 @@ export function WordToPdfTool() {
     }
 
     setBusy(true);
+    setStatus("uploading");
+    setProgress(0);
 
     try {
-      let pdfBlob: Blob;
+      // Create FormData for multipart upload
+      const formData = new FormData();
+      formData.append("file", file);
 
-      // The pdf-lib renderer parses the real DOCX structure (styles,
-      // numbering, indentation, tables, page breaks, etc.) and is the
-      // primary path. `docx-to-pdf-wasm` is a single-author, unaudited
-      // v0.1.0 package with no track record for layout fidelity, so it's
-      // only used as a last-resort fallback if the primary renderer throws.
-      try {
-        pdfBlob = await renderWordToRealTextPdf(file);
-      } catch (primaryError) {
-        console.warn(
-          "pdf-lib Word renderer failed, falling back to docx-to-pdf-wasm:",
-          primaryError,
-        );
-        pdfBlob = await convertWordToPdfWithWasm(file);
-      }
+      // Upload to backend API with progress tracking
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = (event.loaded / event.total) * 50; // 0-50% for upload
+          setProgress(percentComplete);
+        }
+      });
+
+      // Handle completion
+      const uploadPromise = new Promise<Blob>((resolve, reject) => {
+        xhr.addEventListener("load", () => {
+          if (xhr.status === 200) {
+            setStatus("converting");
+            setProgress(75);
+            // Get the response as a Blob (PDF)
+            const blob = xhr.response as Blob;
+            resolve(blob);
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText);
+              reject(new Error(errorData.message || "Conversion failed"));
+            } catch {
+              reject(new Error(`Conversion failed (status ${xhr.status})`));
+            }
+          }
+        });
+
+        xhr.addEventListener("error", () => {
+          reject(new Error("Network error during upload"));
+        });
+
+        xhr.addEventListener("abort", () => {
+          reject(new Error("Upload cancelled"));
+        });
+      });
+
+      xhr.responseType = "blob";
+      xhr.open("POST", "/.netlify/functions/docx-to-pdf", true);
+      xhr.send(formData);
+
+      const pdfBlob = await uploadPromise;
 
       if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
-        throw new Error("The Word document did not produce a valid PDF.");
+        throw new Error("The conversion produced an empty PDF.");
       }
 
+      // Download the PDF
       const baseName = file.name.replace(/\.docx?$/i, "").trim() || "document";
-      const outputName = `lazy-pdf-${baseName}.pdf`;
+      const outputName = `${baseName}.pdf`;
 
       downloadBlob(pdfBlob, outputName, "application/pdf");
-      toast.success("Word converted to PDF.");
+      
+      setProgress(100);
+      setStatus("done");
+      toast.success("Word document converted to PDF successfully.");
+      
+      // Reset after a delay
+      setTimeout(() => {
+        setFile(null);
+        setStatus("idle");
+        setProgress(0);
+      }, 2000);
     } catch (error) {
       console.error("Word to PDF conversion failed:", error);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Word to PDF conversion failed.",
-      );
+      setStatus("error");
+      
+      const errorMessage = error instanceof Error ? error.message : "Word to PDF conversion failed";
+      
+      // Provide helpful error messages
+      if (errorMessage.includes("LibreOffice")) {
+        toast.error("Server is not configured for DOCX conversion. Please contact administrator.");
+      } else if (errorMessage.includes("Invalid file")) {
+        toast.error("The file appears to be corrupted or not a valid DOCX document.");
+      } else if (errorMessage.includes("timeout")) {
+        toast.error("Conversion took too long. Try a smaller or simpler document.");
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setBusy(false);
     }
   }
+
   return (
     <FileToPdf
       accept={{
@@ -1310,6 +1371,8 @@ export function WordToPdfTool() {
       busy={busy}
       run={run}
       label="Convert Word to PDF"
+      progress={progress}
+      status={status}
     />
   );
 }
@@ -1469,6 +1532,8 @@ function FileToPdf({
   busy,
   run,
   label,
+  progress = 0,
+  status = "idle",
 }: {
   accept: Record<string, string[]>;
   file: File | null;
@@ -1476,7 +1541,19 @@ function FileToPdf({
   busy: boolean;
   run: () => void;
   label: string;
+  progress?: number;
+  status?: "idle" | "uploading" | "converting" | "done" | "error";
 }) {
+  const getStatusText = () => {
+    switch (status) {
+      case "uploading": return "Uploading...";
+      case "converting": return "Converting...";
+      case "done": return "Complete!";
+      case "error": return "Failed";
+      default: return label;
+    }
+  };
+
   return (
     <div className="space-y-6">
       {!file ? (
@@ -1492,15 +1569,38 @@ function FileToPdf({
             <div className="font-medium">{file.name}</div>
             <div className="text-sm text-muted-foreground">{formatBytes(file.size)}</div>
           </div>
-          <Button variant="ghost" onClick={() => setFile(null)}>
+          <Button variant="ghost" onClick={() => setFile(null)} disabled={busy}>
             Change
           </Button>
         </div>
       )}
+      
+      {busy && progress > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">{getStatusText()}</span>
+            <span className="text-muted-foreground">{Math.round(progress)}%</span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${
+                status === "error" ? "bg-red-500" : status === "done" ? "bg-green-500" : "bg-blue-500"
+              }`}
+              style={{ width: `${Math.min(progress, 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+      
       <div className="flex justify-end">
-        <Button variant="action" size="xl" onClick={run} disabled={!file || busy}>
+        <Button 
+          variant="action" 
+          size="xl" 
+          onClick={run} 
+          disabled={!file || busy}
+        >
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {label}
+          {getStatusText()}
         </Button>
       </div>
     </div>

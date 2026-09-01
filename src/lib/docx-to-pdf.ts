@@ -18,18 +18,6 @@ type TextRun = {
   style: RunStyle;
 };
 
-/**
- * Intermediate run produced while walking paragraph XML, before Word field
- * codes (PAGE, NUMPAGES, etc.) are resolved into real TextRuns. Kept
- * separate from TextRun so the field state machine can tell "visible text"
- * apart from "field instruction" and "cached field result" content.
- */
-type RawPiece = {
-  text: string;
-  style: RunStyle;
-  kind: "text" | "instrText" | "fldBegin" | "fldSeparate" | "fldEnd";
-};
-
 type ParagraphModel = {
   runs: TextRun[];
   alignment: Alignment;
@@ -51,10 +39,6 @@ type ParagraphModel = {
     color: RGB;
     space: number;
   };
-  // Present only on header/footer paragraphs whose field codes (PAGE,
-  // NUMPAGES) are resolved later, once the final page count is known.
-  // `runs` is empty for these until resolveHeaderFooterParagraph() fills it in.
-  rawRuns?: RawPiece[];
 };
 
 type TableCell = {
@@ -64,7 +48,6 @@ type TableCell = {
 
 type TableRow = {
   cells: TableCell[];
-  isHeader: boolean;
 };
 
 type TableModel = {
@@ -104,57 +87,18 @@ const DEFAULT_MARGIN_TWIPS = 1440;
  * drawing so one unsupported character cannot abort the whole conversion.
  */
 function toWinAnsiSafeText(value: string): string {
-  const normalized = value
-    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
-    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-    .replace(/[\u2013\u2014\u2212\u2015]/g, "-")
+  return value
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014\u2212]/g, "-")
     .replace(/\u2026/g, "...")
-    .replace(/[\u25CF\u25AA\u25A0\u00B7\u2219]/g, "\u2022")
-    .replace(/[\u2192\u21D2]/g, "->")
-    .replace(/[\u2190\u21D0]/g, "<-")
-    .replace(/\u2713/g, "v")
-    .replace(/\u2717/g, "x")
-    .replace(/\u2122/g, "(TM)")
-    .replace(/\u2117/g, "(P)")
-    .replace(/\uFB00/g, "ff")
-    .replace(/\uFB01/g, "fi")
-    .replace(/\uFB02/g, "fl")
-    .replace(/\uFB03/g, "ffi")
-    .replace(/\uFB04/g, "ffl")
-    .replace(/[\u00BC]/g, "1/4")
-    .replace(/[\u00BD]/g, "1/2")
-    .replace(/[\u00BE]/g, "3/4")
+    .replace(/[\u25CF\u25AA\u25A0\u00B7]/g, "\u2022")
     .replace(/[\u00B9\u00B2\u00B3]/g, (character) => (
       { "¹": "1", "²": "2", "³": "3" }[character] ?? character
     ))
-    .replace(/[\u200B\u200C\uFEFF]/g, "")
-    .replace(/\u200D/g, "")
-    .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
-
-  // Anything still outside the WinAnsi-safe Latin-1 range at this point
-  // (e.g. Czech, Polish, Croatian, Romanian, Vietnamese, or Turkish letters
-  // whose accented form isn't in Latin-1) gets a best-effort decompose and
-  // strip-diacritics fallback so the base letter survives instead of
-  // collapsing straight to "?". True non-Latin scripts (CJK, Cyrillic,
-  // Greek, Arabic, etc.) still can't be represented by the standard
-  // WinAnsi-encoded PDF fonts used here and fall through to "?".
-  let result = "";
-  for (const character of normalized) {
-    const code = character.charCodeAt(0);
-    const isTabNewlineOrFormFeed = character === "\t" || character === "\n" || character === "\f";
-    if (isTabNewlineOrFormFeed) {
-      result += character;
-      continue;
-    }
-    if (code < 0x20) continue; // strip stray control characters
-    if (code <= 0xff || character === "\u2022") {
-      result += character;
-      continue;
-    }
-    const decomposed = character.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
-    result += decomposed && decomposed.charCodeAt(0) <= 0xff ? decomposed : "?";
-  }
-  return result;
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")
+    .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ")
+    .replace(/[^\x20-\xFF\u2022\t\n\f]/g, "?");
 }
 
 function localName(node: Element | null): string {
@@ -438,46 +382,34 @@ function toLetters(value: number): string {
   return result;
 }
 
-function parseRun(runNode: Element, inherited: RunStyle): RawPiece[] {
+function parseRun(runNode: Element, inherited: RunStyle): TextRun[] {
   const runProperties = childElement(runNode, "rPr");
   const style = parseRunStyle(runProperties, inherited);
-  const result: RawPiece[] = [];
+  const result: TextRun[] = [];
 
   for (const child of Array.from(runNode.children)) {
     switch (localName(child)) {
       case "t":
+      case "instrText":
       case "delText": {
-        result.push({ text: toWinAnsiSafeText(child.textContent ?? ""), style, kind: "text" });
-        break;
-      }
-      case "instrText": {
-        // Field instruction code (e.g. " PAGE ", " HYPERLINK \"...\" ").
-        // Never visible text on its own — resolveFields() interprets it.
-        result.push({ text: toWinAnsiSafeText(child.textContent ?? ""), style, kind: "instrText" });
-        break;
-      }
-      case "fldChar": {
-        const fldCharType = getAttr(child, "fldCharType");
-        if (fldCharType === "begin") result.push({ text: "", style, kind: "fldBegin" });
-        else if (fldCharType === "separate") result.push({ text: "", style, kind: "fldSeparate" });
-        else if (fldCharType === "end") result.push({ text: "", style, kind: "fldEnd" });
+        result.push({ text: toWinAnsiSafeText(child.textContent ?? ""), style });
         break;
       }
       case "tab":
       case "ptab":
         // Maintain exact tab characters so wrapParagraphLines can enforce a fixed column jump
-        result.push({ text: "\t", style, kind: "text" });
+        result.push({ text: "\t", style });
         break;
       case "br": {
         const type = getAttr(child, "type");
-        result.push({ text: type === "page" ? "\f" : "\n", style, kind: "text" });
+        result.push({ text: type === "page" ? "\f" : "\n", style });
         break;
       }
       case "noBreakHyphen":
-        result.push({ text: "-", style, kind: "text" });
+        result.push({ text: "-", style });
         break;
       case "softHyphen":
-        result.push({ text: "\u00AD", style, kind: "text" });
+        result.push({ text: "\u00AD", style });
         break;
       default:
         break;
@@ -487,73 +419,8 @@ function parseRun(runNode: Element, inherited: RunStyle): RawPiece[] {
   return result;
 }
 
-/**
- * Collapses a flat run sequence into final visible TextRuns, resolving Word
- * field codes instead of letting raw instruction text (" PAGE ", " HYPERLINK
- * ... ") leak into the document as literal characters.
- *
- * Handles both field forms:
- *  - complex fields: fldChar(begin) ... instrText ... fldChar(separate) ... cached result runs ... fldChar(end)
- *  - simple fields: <w:fldSimple w:instr="..."> cached result runs </w:fldSimple>, expanded by
- *    collectRunsInOrder into the same begin/instrText/separate/result/end shape.
- *
- * When `liveContext` is supplied (used for header/footer rendering, once the
- * final page count is known), PAGE and NUMPAGES fields are replaced with the
- * real page number / total page count instead of Word's cached result text.
- * Without it (ordinary body content), other field types fall back to
- * rendering their cached result — accurate for static fields and, per the
- * "never render field-code XML as raw text" requirement, at least never
- * shows the instruction code itself.
- */
-function resolveFields(raw: RawPiece[], liveContext?: { page: number; totalPages: number }): TextRun[] {
-  const output: TextRun[] = [];
-  let state: "none" | "instr" | "result" = "none";
-  let instrBuffer = "";
-  let skipResult = false;
-
-  for (const piece of raw) {
-    switch (piece.kind) {
-      case "fldBegin":
-        state = "instr";
-        instrBuffer = "";
-        skipResult = false;
-        break;
-      case "fldSeparate": {
-        const instr = instrBuffer.trim();
-        if (liveContext && /^PAGE\b/i.test(instr)) {
-          output.push({ text: String(liveContext.page), style: piece.style });
-          skipResult = true;
-        } else if (liveContext && /^NUMPAGES\b/i.test(instr)) {
-          output.push({ text: String(liveContext.totalPages), style: piece.style });
-          skipResult = true;
-        } else {
-          skipResult = false;
-        }
-        state = "result";
-        break;
-      }
-      case "fldEnd":
-        state = "none";
-        skipResult = false;
-        break;
-      case "instrText":
-        if (state === "instr") instrBuffer += piece.text;
-        else output.push({ text: piece.text, style: piece.style });
-        break;
-      case "text":
-        if (state === "result" && skipResult) break;
-        output.push({ text: piece.text, style: piece.style });
-        break;
-      default:
-        break;
-    }
-  }
-
-  return output;
-}
-
-function collectRunsInOrder(node: Element, defaultRun: RunStyle): RawPiece[] {
-  const runs: RawPiece[] = [];
+function collectRunsInOrder(node: Element, defaultRun: RunStyle): TextRun[] {
+  const runs: TextRun[] = [];
   for (const child of Array.from(node.children)) {
     const name = localName(child);
 
@@ -564,16 +431,6 @@ function collectRunsInOrder(node: Element, defaultRun: RunStyle): RawPiece[] {
       // their children (sdt uses sdtContent as an extra nesting level).
       const container = name === "sdt" ? childElement(child, "sdtContent") ?? child : child;
       runs.push(...collectRunsInOrder(container, defaultRun));
-    } else if (name === "fldSimple") {
-      // Self-contained field: <w:fldSimple w:instr="PAGE"><w:r>1</w:r></w:fldSimple>.
-      // Expand into the same begin/instrText/separate/result/end shape that
-      // complex fields use so resolveFields() can handle both uniformly.
-      const instr = getAttr(child, "instr") ?? "";
-      runs.push({ text: "", style: defaultRun, kind: "fldBegin" });
-      runs.push({ text: instr, style: defaultRun, kind: "instrText" });
-      runs.push({ text: "", style: defaultRun, kind: "fldSeparate" });
-      runs.push(...collectRunsInOrder(child, defaultRun));
-      runs.push({ text: "", style: defaultRun, kind: "fldEnd" });
     }
     // "del" (deleted/tracked-change text) is intentionally skipped
   }
@@ -585,7 +442,6 @@ function parseParagraph(
   styles: Map<string, StyleDefaults>,
   numbering: Map<string, Map<number, { format: string; text: string; start: number }>>,
   numberingCounters: Map<string, number>,
-  deferFieldResolution = false,
 ): ParagraphModel {
   const pPr = childElement(paragraphNode, "pPr");
   const styleId = getAttr(childElement(pPr ?? document.createElement("span"), "pStyle"), "val");
@@ -645,8 +501,7 @@ function parseParagraph(
   }
 
   // Uses recursive runner to fetch deeply nested text
-  const rawPieces = collectRunsInOrder(paragraphNode, defaultRun);
-  const runs: TextRun[] = deferFieldResolution ? [] : resolveFields(rawPieces);
+  const runs: TextRun[] = collectRunsInOrder(paragraphNode, defaultRun);
 
   const paragraphBorders = childElement(pPr ?? document.createElement("span"), "pBdr");
   const bottomBorderNode = childElement(paragraphBorders ?? document.createElement("span"), "bottom");
@@ -658,11 +513,7 @@ function parseParagraph(
       }
     : undefined;
 
-  const normalizedRuns = deferFieldResolution
-    ? runs
-    : runs.length > 0
-      ? runs
-      : [{ text: "", style: defaultRun }];
+  const normalizedRuns = runs.length > 0 ? runs : [{ text: "", style: defaultRun }];
 
   if (headingLevel) {
     const headingSizes: Record<number, number> = { 1: 18, 2: 16, 3: 14, 4: 13, 5: 12, 6: 11 };
@@ -690,29 +541,7 @@ function parseParagraph(
     styleId,
     headingLevel,
     bottomBorder,
-    rawRuns: deferFieldResolution ? rawPieces : undefined,
   };
-}
-
-/**
- * Resolves the field codes in a header/footer paragraph now that the real
- * page number and total page count are known, producing a paragraph ready
- * to wrap and draw. Also applies the same heading-size bump parseParagraph
- * would have applied (headers/footers rarely use heading styles, but stay
- * consistent if they do).
- */
-function resolveHeaderFooterParagraph(
-  paragraph: ParagraphModel,
-  page: number,
-  totalPages: number,
-): ParagraphModel {
-  const resolved = resolveFields(paragraph.rawRuns ?? [], { page, totalPages });
-  const runs = resolved.length > 0 ? resolved : [{ text: "", style: defaultBodyRunStyle() }];
-  return { ...paragraph, runs, rawRuns: undefined };
-}
-
-function defaultBodyRunStyle(): RunStyle {
-  return { bold: false, italic: false, underline: false, fontSize: 10, color: rgb(0, 0, 0) };
 }
 
 function parseTable(
@@ -738,24 +567,17 @@ function parseTable(
       );
       cells.push({ paragraphs, widthTwips: cellWidthTwips > 0 ? cellWidthTwips : undefined });
     }
-    const rowProperties = childElement(rowNode, "trPr");
-    const isHeader = Boolean(parseBooleanProperty(childElement(rowProperties ?? document.createElement("span"), "tblHeader")));
-    rows.push({ cells, isHeader });
+    rows.push({ cells });
   }
 
   return { rows, columnWidths };
 }
 
-type SectionReferences = {
-  headerRelId?: string;
-  footerRelId?: string;
-};
-
 function parseBodyBlocks(
   documentXml: string,
   styles: Map<string, StyleDefaults>,
   numbering: Map<string, Map<number, { format: string; text: string; start: number }>>,
-): { blocks: Block[]; section: PageSection; references: SectionReferences } {
+): { blocks: Block[]; section: PageSection } {
   const document = parseXml(documentXml, "Word document");
   const body = childElement(document.documentElement, "body");
   if (!body) throw new Error("The Word document does not contain a readable document body.");
@@ -774,58 +596,7 @@ function parseBodyBlocks(
   }
 
   const sectPr = childElement(body, "sectPr");
-  return { blocks, section: parseSection(sectPr), references: parseSectionReferences(sectPr) };
-}
-
-/**
- * Finds the default header/footer reference for the section. Word can
- * define separate "first page" and "even page" headers/footers via the
- * `w:type` attribute, but the overwhelmingly common case is a single
- * "default" header/footer applied to every page — that's what's supported
- * here. Falls back to whichever reference is present if "default" is absent.
- */
-function parseSectionReferences(sectPr: Element | null): SectionReferences {
-  if (!sectPr) return {};
-
-  const headerRefs = childElements(sectPr, "headerReference");
-  const footerRefs = childElements(sectPr, "footerReference");
-
-  const pickReference = (refs: Element[]): string | undefined => {
-    const defaultRef = refs.find((ref) => (getAttr(ref, "type") ?? "default") === "default");
-    return getAttr(defaultRef ?? refs[0], "id");
-  };
-
-  return {
-    headerRelId: pickReference(headerRefs),
-    footerRelId: pickReference(footerRefs),
-  };
-}
-
-/** Parses word/_rels/document.xml.rels into a map of r:id -> target path (relative to word/). */
-function parseRelationships(relsXml: string | undefined): Map<string, string> {
-  const relationships = new Map<string, string>();
-  if (!relsXml) return relationships;
-
-  const document = parseXml(relsXml, "Word relationships");
-  for (const relNode of Array.from(document.documentElement.children)) {
-    const id = getAttr(relNode, "Id");
-    const target = getAttr(relNode, "Target");
-    if (id && target) relationships.set(id, target.replace(/^\//, ""));
-  }
-  return relationships;
-}
-
-/** Parses a word/header*.xml or word/footer*.xml part into paragraphs, deferring field-code resolution. */
-function parseHeaderFooterXml(
-  xml: string,
-  styles: Map<string, StyleDefaults>,
-  numbering: Map<string, Map<number, { format: string; text: string; start: number }>>,
-): ParagraphModel[] {
-  const document = parseXml(xml, "Word header/footer");
-  const counters = new Map<string, number>();
-  return childElements(document.documentElement, "p").map((paragraphNode) =>
-    parseParagraph(paragraphNode, styles, numbering, counters, true),
-  );
+  return { blocks, section: parseSection(sectPr) };
 }
 
 type PageSection = {
@@ -1361,20 +1132,27 @@ function drawTable(
           () => contentWidth / columnCount,
         );
 
-  const measureRowHeight = (row: TableRow): number =>
-    Math.max(
-      24,
-      ...row.cells.map((cell, index) =>
-        measureTableCellHeight(cell, widths[index] ?? widths[widths.length - 1], fonts),
+  for (const row of table.rows) {
+    const cellHeights = row.cells.map((cell, index) =>
+      measureTableCellHeight(
+        cell,
+        widths[index] ?? widths[widths.length - 1],
+        fonts,
       ),
     );
 
-  const drawRow = (row: TableRow, rowHeight: number): void => {
+    const rowHeight = Math.max(24, ...cellHeights);
+
+    if (ctx.cursorY - rowHeight < ctx.bottomLimit) {
+      ctx.addPage();
+    }
+
     const rowTopY = ctx.cursorY;
     let cursorX = x;
 
     row.cells.forEach((cell, index) => {
-      const cellWidth = widths[index] ?? widths[widths.length - 1];
+      const cellWidth =
+        widths[index] ?? widths[widths.length - 1];
 
       ctx.page.drawRectangle({
         x: cursorX,
@@ -1441,24 +1219,6 @@ function drawTable(
     });
 
     ctx.cursorY = rowTopY - rowHeight;
-  };
-
-  // Rows marked with w:tblHeader repeat at the top of every page the table
-  // spans, matching Word's "repeat as header row" table option.
-  const headerRows = table.rows.filter((row) => row.isHeader);
-  const headerRowHeights = headerRows.map((row) => measureRowHeight(row));
-
-  for (const row of table.rows) {
-    const rowHeight = measureRowHeight(row);
-
-    if (ctx.cursorY - rowHeight < ctx.bottomLimit) {
-      ctx.addPage();
-      if (!row.isHeader) {
-        headerRows.forEach((headerRow, index) => drawRow(headerRow, headerRowHeights[index]));
-      }
-    }
-
-    drawRow(row, rowHeight);
   }
 }
 
@@ -1466,15 +1226,12 @@ async function readDocxXml(file: File): Promise<{
   documentXml: string;
   stylesXml: string;
   numberingXml: string;
-  relationshipsXml?: string;
-  zip: JSZip;
 }> {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const [documentXml, stylesXml, numberingXml, relationshipsXml] = await Promise.all([
+  const [documentXml, stylesXml, numberingXml] = await Promise.all([
     zip.file("word/document.xml")?.async("text"),
     zip.file("word/styles.xml")?.async("text"),
     zip.file("word/numbering.xml")?.async("text"),
-    zip.file("word/_rels/document.xml.rels")?.async("text"),
   ]);
 
   if (!documentXml) throw new Error("The DOCX file does not contain word/document.xml.");
@@ -1482,48 +1239,7 @@ async function readDocxXml(file: File): Promise<{
     documentXml,
     stylesXml: stylesXml ?? "<?xml version=\"1.0\"?><styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"/>;",
     numberingXml: numberingXml ?? "<?xml version=\"1.0\"?><numbering xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"/>;",
-    relationshipsXml,
-    zip,
   };
-}
-
-/**
- * Draws a fixed block of paragraphs (a resolved header or footer) starting
- * at `topY` and flowing downward, without page-break/overflow handling —
- * headers and footers are short, fixed-area content that never spans pages.
- */
-function drawHeaderFooterParagraphs(
-  page: PDFPage,
-  paragraphs: ParagraphModel[],
-  x: number,
-  contentWidth: number,
-  fonts: Record<FontFace, PDFFont>,
-  topY: number,
-): void {
-  let cursorY = topY;
-  for (const paragraph of paragraphs) {
-    const availableWidth = Math.max(20, contentWidth - paragraph.leftIndent - paragraph.rightIndent);
-    const lines = wrapParagraphLines(paragraph, availableWidth, fonts);
-    const lineHeight = getParagraphLineHeight(paragraph);
-
-    cursorY -= paragraph.beforeSpacing;
-    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-      drawTextRunLine(page, lines[lineIndex], paragraph, x, cursorY, contentWidth, fonts, lineIndex === lines.length - 1);
-      cursorY -= lineHeight;
-    }
-    cursorY -= paragraph.afterSpacing;
-  }
-}
-
-/** Total rendered height of a resolved header/footer paragraph block, used to top-anchor footers above the bottom margin. */
-function measureHeaderFooterHeight(paragraphs: ParagraphModel[], contentWidth: number, fonts: Record<FontFace, PDFFont>): number {
-  let height = 0;
-  for (const paragraph of paragraphs) {
-    const availableWidth = Math.max(20, contentWidth - paragraph.leftIndent - paragraph.rightIndent);
-    const lines = wrapParagraphLines(paragraph, availableWidth, fonts);
-    height += paragraph.beforeSpacing + lines.length * getParagraphLineHeight(paragraph) + paragraph.afterSpacing;
-  }
-  return height;
 }
 
 export async function renderWordToRealTextPdf(file: File): Promise<Blob> {
@@ -1538,23 +1254,11 @@ export async function renderWordToRealTextPdf(file: File): Promise<Blob> {
   }
 
   try {
-    const { documentXml, stylesXml, numberingXml, relationshipsXml, zip } = await readDocxXml(file);
+    const { documentXml, stylesXml, numberingXml } = await readDocxXml(file);
 
     const styles = parseStyleSheet(stylesXml);
   const numbering = parseNumbering(numberingXml);
-  const { blocks, section, references } = parseBodyBlocks(documentXml, styles, numbering);
-
-  const relationships = parseRelationships(relationshipsXml);
-  const headerTarget = references.headerRelId ? relationships.get(references.headerRelId) : undefined;
-  const footerTarget = references.footerRelId ? relationships.get(references.footerRelId) : undefined;
-
-  const [headerXml, footerXml] = await Promise.all([
-    headerTarget ? zip.file(`word/${headerTarget}`)?.async("text") : Promise.resolve(undefined),
-    footerTarget ? zip.file(`word/${footerTarget}`)?.async("text") : Promise.resolve(undefined),
-  ]);
-
-  const headerParagraphs = headerXml ? parseHeaderFooterXml(headerXml, styles, numbering) : [];
-  const footerParagraphs = footerXml ? parseHeaderFooterXml(footerXml, styles, numbering) : [];
+  const { blocks, section } = parseBodyBlocks(documentXml, styles, numbering);
 
   const pdf = await PDFDocument.create();
   const fonts: Record<FontFace, PDFFont> = {
@@ -1659,43 +1363,6 @@ export async function renderWordToRealTextPdf(file: File): Promise<Blob> {
     }
   }
 
-  if (headerParagraphs.length > 0 || footerParagraphs.length > 0) {
-    const pages = pdf.getPages();
-    const totalPages = pages.length;
-
-    pages.forEach((page, pageIndex) => {
-      const pageNumber = pageIndex + 1;
-
-      if (headerParagraphs.length > 0) {
-        const resolvedHeader = headerParagraphs.map((paragraph) =>
-          resolveHeaderFooterParagraph(paragraph, pageNumber, totalPages),
-        );
-        drawHeaderFooterParagraphs(
-          page,
-          resolvedHeader,
-          section.marginLeft,
-          contentWidth,
-          fonts,
-          section.height - section.headerDistance,
-        );
-      }
-
-      if (footerParagraphs.length > 0) {
-        const resolvedFooter = footerParagraphs.map((paragraph) =>
-          resolveHeaderFooterParagraph(paragraph, pageNumber, totalPages),
-        );
-        const footerHeight = measureHeaderFooterHeight(resolvedFooter, contentWidth, fonts);
-        drawHeaderFooterParagraphs(
-          page,
-          resolvedFooter,
-          section.marginLeft,
-          contentWidth,
-          fonts,
-          section.footerDistance + footerHeight,
-        );
-      }
-    });
-  }
 
     const bytes = await pdf.save({ useObjectStreams: true });
 
