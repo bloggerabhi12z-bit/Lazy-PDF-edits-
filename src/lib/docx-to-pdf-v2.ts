@@ -136,9 +136,12 @@ function parseHexColor(value: string | undefined, fallback?: RGB): RGB | undefin
 }
 
 function resolveRelativePath(basePath: string, targetPath: string): string {
-  if (targetPath.startsWith("/")) return targetPath.substring(1);
+  const decodedTarget = targetPath.split("/").map((part) => {
+    try { return decodeURIComponent(part); } catch { return part; }
+  }).join("/");
+  if (decodedTarget.startsWith("/")) return decodedTarget.substring(1);
   const baseParts = basePath.split("/").slice(0, -1);
-  const targetParts = targetPath.split("/");
+  const targetParts = decodedTarget.split("/");
   for (const part of targetParts) {
     if (part === "..") baseParts.pop();
     else if (part !== ".") baseParts.push(part);
@@ -343,15 +346,14 @@ class DocxParser {
     let currentBlocks: Block[] = [];
 
     const flushSection = (sectPr: Element | null) => {
-      if (!sectPr) return;
-      const pgSz = child(sectPr, "pgSz");
-      const pgMar = child(sectPr, "pgMar");
+      const pgSz = sectPr ? child(sectPr, "pgSz") : null;
+      const pgMar = sectPr ? child(sectPr, "pgMar") : null;
       const orient = attr(pgSz, "orient") === "landscape" ? "landscape" : "portrait";
       const w = twipsToPts(parseInt(attr(pgSz, "w") || "12240", 10));
       const h = twipsToPts(parseInt(attr(pgSz, "h") || "15840", 10));
 
-      const headerRefs = children(sectPr, "headerReference");
-      const footerRefs = children(sectPr, "footerReference");
+      const headerRefs = sectPr ? children(sectPr, "headerReference") : [];
+      const footerRefs = sectPr ? children(sectPr, "footerReference") : [];
 
       sections.push({
         width: orient === "landscape" ? Math.max(w, h) : Math.min(w, h),
@@ -365,7 +367,7 @@ class DocxParser {
         },
         headerDistance: twipsToPts(parseInt(attr(pgMar, "header") || "720", 10)),
         footerDistance: twipsToPts(parseInt(attr(pgMar, "footer") || "720", 10)),
-        titlePg: parseBool(child(sectPr, "titlePg")),
+        titlePg: sectPr ? parseBool(child(sectPr, "titlePg")) : false,
         headerRelId: (headerRefs.find(r => attr(r, "type") === "default") || headerRefs[0])?.getAttribute("r:id") ?? undefined,
         footerRelId: (footerRefs.find(r => attr(r, "type") === "default") || footerRefs[0])?.getAttribute("r:id") ?? undefined,
         headerFirstRelId: headerRefs.find(r => attr(r, "type") === "first")?.getAttribute("r:id") ?? undefined,
@@ -395,7 +397,10 @@ class DocxParser {
     }
     
     if (currentBlocks.length > 0 && sections.length === 0) {
-        flushSection(child(body, "sectPr"));
+        flushSection(child(body, "sectPr") || null);
+        if (sections.length === 0) {
+          flushSection(null);
+        }
     } else if (currentBlocks.length > 0 && sections.length > 0) {
         sections[sections.length - 1].blocks.push(...currentBlocks);
     }
@@ -681,7 +686,7 @@ class PdfLayoutEngine {
 
     // 3. Built-in StandardFonts mapping fallback
     if (family.includes("times") || family.includes("georgia") || family.includes("cambria")) {
-      if (style.bold && style.italic) return this.fonts["TimesRomanBoldItalic"] || this.fonts["HelveticaBoldOblique"];
+      if (style.bold && style.italic) return this.fonts["TimesRomanBoldItalic"] || this.fonts["HelveticaBoldOblique"] || this.fonts["Helvetica"];
       if (style.bold) return this.fonts["TimesRomanBold"] || this.fonts["HelveticaBold"];
       if (style.italic) return this.fonts["TimesRomanOblique"] || this.fonts["HelveticaOblique"];
       return this.fonts["TimesRoman"] || this.fonts["Helvetica"];
@@ -728,7 +733,7 @@ class PdfLayoutEngine {
         this.currentCmds = [];
         const sandbox = new PdfLayoutEngine(this.fonts, this.globalImageMap, true, 0);
         sandbox.layoutBlocks(footerBlocksMap.get(fId)!, s.margins.left, s.width - s.margins.right, s, true, i+1, this.pages.length);
-        const fHeight = -sandbox.cursorY;
+        const fHeight = Math.max(0, sandbox.cursorY);
         
         this.cursorY = s.height - s.footerDistance - fHeight;
         this.layoutBlocks(footerBlocksMap.get(fId)!, s.margins.left, s.width - s.margins.right, s, true, i+1, this.pages.length);
@@ -761,7 +766,7 @@ class PdfLayoutEngine {
          while (checkIdx < blocks.length && blocks[checkIdx].type === "paragraph") {
             const sandbox = new PdfLayoutEngine(this.fonts, this.globalImageMap, true, 0);
             sandbox.layoutParagraph(blocks[checkIdx] as ParagraphModel, startX, endX, section, true, pageNum, totalPages);
-            groupH += -sandbox.cursorY;
+            groupH += Math.max(0, sandbox.cursorY);
             if (!(blocks[checkIdx] as ParagraphModel).keepNext) break;
             checkIdx++;
          }

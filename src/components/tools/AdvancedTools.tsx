@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
 import { createTextPdf, stripHtml } from "@/lib/text-pdf";
+import { renderWordToPdfV2 } from "@/lib/docx-to-pdf-v2";
 import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1267,58 +1268,13 @@ export function WordToPdfTool() {
     }
 
     setBusy(true);
-    setStatus("uploading");
-    setProgress(0);
+    setStatus("converting");
+    setProgress(10);
 
     try {
-      // Create FormData for multipart upload
-      const formData = new FormData();
-      formData.append("file", file);
-
-      // Upload to backend API with progress tracking
-      const xhr = new XMLHttpRequest();
-
-      // Track upload progress
-      xhr.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable) {
-          const percentComplete = (event.loaded / event.total) * 50; // 0-50% for upload
-          setProgress(percentComplete);
-        }
-      });
-
-      // Handle completion
-      const uploadPromise = new Promise<Blob>((resolve, reject) => {
-        xhr.addEventListener("load", () => {
-          if (xhr.status === 200) {
-            setStatus("converting");
-            setProgress(75);
-            // Get the response as a Blob (PDF)
-            const blob = xhr.response as Blob;
-            resolve(blob);
-          } else {
-            try {
-              const errorData = JSON.parse(xhr.responseText);
-              reject(new Error(errorData.message || "Conversion failed"));
-            } catch {
-              reject(new Error(`Conversion failed (status ${xhr.status})`));
-            }
-          }
-        });
-
-        xhr.addEventListener("error", () => {
-          reject(new Error("Network error during upload"));
-        });
-
-        xhr.addEventListener("abort", () => {
-          reject(new Error("Upload cancelled"));
-        });
-      });
-
-      xhr.responseType = "blob";
-      xhr.open("POST", "/.netlify/functions/docx-to-pdf", true);
-      xhr.send(formData);
-
-      const pdfBlob = await uploadPromise;
+      // Client-side conversion using renderWordToPdfV2
+      setProgress(25);
+      const pdfBlob = await renderWordToPdfV2(file);
 
       if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
         throw new Error("The conversion produced an empty PDF.");
@@ -1328,6 +1284,7 @@ export function WordToPdfTool() {
       const baseName = file.name.replace(/\.docx?$/i, "").trim() || "document";
       const outputName = `${baseName}.pdf`;
 
+      setProgress(90);
       downloadBlob(pdfBlob, outputName, "application/pdf");
       
       setProgress(100);
@@ -1347,12 +1304,12 @@ export function WordToPdfTool() {
       const errorMessage = error instanceof Error ? error.message : "Word to PDF conversion failed";
       
       // Provide helpful error messages
-      if (errorMessage.includes("LibreOffice")) {
-        toast.error("Server is not configured for DOCX conversion. Please contact administrator.");
-      } else if (errorMessage.includes("Invalid file")) {
+      if (errorMessage.includes("Unsupported")) {
+        toast.error("The document contains unsupported formatting or content types.");
+      } else if (errorMessage.includes("corrupted")) {
         toast.error("The file appears to be corrupted or not a valid DOCX document.");
-      } else if (errorMessage.includes("timeout")) {
-        toast.error("Conversion took too long. Try a smaller or simpler document.");
+      } else if (errorMessage.includes("empty")) {
+        toast.error("The document is empty or contains no convertible content.");
       } else {
         toast.error(errorMessage);
       }
