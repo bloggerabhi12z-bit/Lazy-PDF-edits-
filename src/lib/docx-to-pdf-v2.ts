@@ -396,13 +396,20 @@ class DocxParser {
       }
     }
     
-    if (currentBlocks.length > 0 && sections.length === 0) {
-        flushSection(child(body, "sectPr") || null);
-        if (sections.length === 0) {
-          flushSection(null);
-        }
-    } else if (currentBlocks.length > 0 && sections.length > 0) {
+    if (currentBlocks.length > 0) {
+      if (sections.length > 0) {
         sections[sections.length - 1].blocks.push(...currentBlocks);
+      } else {
+        flushSection(child(body, "sectPr") || null);
+        if (sections.length > 0 && currentBlocks.length > 0) {
+          sections[sections.length - 1].blocks.push(...currentBlocks);
+        } else if (sections.length === 0) {
+          flushSection(null);
+          if (sections.length > 0) {
+            sections[0].blocks.push(...currentBlocks);
+          }
+        }
+      }
     }
 
     return { sections };
@@ -728,7 +735,7 @@ class PdfLayoutEngine {
         page.commands.push(...this.currentCmds);
       }
 
-      const fId = (isFirst && s.footerFirstRelId) ? s.footerFirstRelId : s.footerRelId;
+const fId = (isFirst && s.footerFirstRelId) ? s.footerFirstRelId : s.footerRelId;
       if (fId && footerBlocksMap.has(fId)) {
         this.currentCmds = [];
         const sandbox = new PdfLayoutEngine(this.fonts, this.globalImageMap, true, 0);
@@ -840,10 +847,66 @@ class PdfLayoutEngine {
         currentLineWidth += w;
         
       } else if (tok.type === "tab") {
-        const nextTab = this.getNextTab(lineX + currentLineWidth, startX, p.tabs);
-        const w = nextTab.x - (lineX + currentLineWidth);
-        currentLine.push(tok);
-        currentLineWidth += w;
+          const nextTab = this.getNextTab(lineX + currentLineWidth, startX, p.tabs);
+          const tabVal = nextTab.val;
+          const tabX = nextTab.x;
+          
+          if (tabVal === "center") {
+            const remainingWidth = availWidth - (tabX - startX);
+            let segmentWidth = 0;
+            let afterTabIdx = line.tokens.indexOf(tok) + 1;
+            while (afterTabIdx < line.tokens.length && line.tokens[afterTabIdx].type !== "tab" && line.tokens[afterTabIdx].type !== "space") {
+               const t = line.tokens[afterTabIdx];
+               if (t.type === "text" || t.type === "field") {
+                 const txt = t.type === "field" ? t.cachedResult! : t.text;
+                 const f = this.resolveFont(t.style);
+                 segmentWidth += f.widthOfTextAtSize(txt, t.style.fontSize) + (txt.length * t.style.characterSpacing);
+               } else if (t.type === "image") {
+                 segmentWidth += t.width;
+               }
+               afterTabIdx++;
+            }
+            currentLineWidth += (remainingWidth - segmentWidth) / 2;
+          } else if (tabVal === "right") {
+            let segmentWidth = 0;
+            let afterTabIdx = line.tokens.indexOf(tok) + 1;
+            while (afterTabIdx < line.tokens.length && line.tokens[afterTabIdx].type !== "tab" && line.tokens[afterTabIdx].type !== "space") {
+               const t = line.tokens[afterTabIdx];
+               if (t.type === "text" || t.type === "field") {
+                 const txt = t.type === "field" ? t.cachedResult! : t.text;
+                 const f = this.resolveFont(t.style);
+                 segmentWidth += f.widthOfTextAtSize(txt, t.style.fontSize) + (txt.length * t.style.characterSpacing);
+               } else if (t.type === "image") {
+                 segmentWidth += t.width;
+               }
+               afterTabIdx++;
+            }
+            currentLineWidth += (tabX - startX) - currentLineWidth - segmentWidth;
+          } else if (tabVal === "decimal") {
+            let segmentWidth = 0;
+            let lastTextWidth = 0;
+            let afterTabIdx = line.tokens.indexOf(tok) + 1;
+            while (afterTabIdx < line.tokens.length && line.tokens[afterTabIdx].type !== "tab" && line.tokens[afterTabIdx].type !== "space") {
+               const t = line.tokens[afterTabIdx];
+               if (t.type === "text" || t.type === "field") {
+                 const txt = t.type === "field" ? t.cachedResult! : t.text;
+                 const f = this.resolveFont(t.style);
+                 const w = f.widthOfTextAtSize(txt, t.style.fontSize) + (txt.length * t.style.characterSpacing);
+                 segmentWidth += w;
+                 lastTextWidth = w;
+               } else if (t.type === "image") {
+                 segmentWidth += t.width;
+                 lastTextWidth = 0;
+               }
+               afterTabIdx++;
+            }
+            const decimalPos = segmentWidth - lastTextWidth;
+            currentLineWidth += (tabX - startX) - currentLineWidth - decimalPos - lastTextWidth;
+          } else {
+            const w = tabX - (lineX + currentLineWidth);
+            currentLineWidth += w;
+          }
+          currentLine.push(tok);
       } else if (tok.type === "field") {
         let txt = tok.cachedResult || "";
         if (tok.instr.includes("PAGE")) txt = String(pageNum);
@@ -1039,9 +1102,14 @@ class PdfLayoutEngine {
         let totalCellH = maxH;
         if (cell.vMerge === "restart") {
            let nr = rowIdx + 1;
+           let spanHeight = 0;
            while (nr < t.rows.length && grid[nr][currentGridCol]?.cell.vMerge === "continue") {
+              if (grid[nr][currentGridCol]) {
+                 spanHeight += grid[nr][currentGridCol].h;
+              }
               nr++;
            }
+           totalCellH = maxH + spanHeight;
         }
 
         if (cell.vMerge !== "continue") {
