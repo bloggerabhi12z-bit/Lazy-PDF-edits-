@@ -1,197 +1,108 @@
 import { Handler, HandlerEvent } from "@netlify/functions";
-import { execSync, spawnSync } from "child_process";
-import { createWriteStream, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "fs";
-import { extname, join, basename } from "path";
-import { tmpdir } from "os";
 
-interface ConversionResult {
-  success: boolean;
-  pdfBuffer?: Buffer;
-  error?: string;
-  message?: string;
-}
+const CONVERTER_URL = process.env.DOCX_CONVERTER_URL || "http://localhost:8080";
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
-/**
- * Detects if LibreOffice is available on the system.
- * Checks multiple common installation paths and PATH environment.
- */
-function detectLibreOffice(): { path: string; version?: string } | null {
-  const possiblePaths = [
-    "libreoffice",
-    "soffice",
-    "/usr/bin/libreoffice",
-    "/usr/bin/soffice",
-    "/usr/local/bin/libreoffice",
-    "/opt/libreoffice/program/soffice",
-    "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
-    "C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
-  ];
-
-  for (const path of possiblePaths) {
-    try {
-      const result = spawnSync(path, ["--version"], {
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 5000,
-      });
-      
-      if (result.status === 0) {
-        const version = result.stdout?.toString().trim() || undefined;
-        console.log(`Found LibreOffice at ${path}: ${version}`);
-        return { path, version };
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Converts a DOCX file to PDF using LibreOffice headless mode.
- * Returns a Buffer containing the PDF data.
- */
-async function convertDocxToPdfLibreOffice(docxBuffer: Buffer): Promise<ConversionResult> {
-  const libreOffice = detectLibreOffice();
+function extractFileFromMultipart(bodyBuffer: Buffer, boundary: string): Buffer | null {
+  const boundaryStr = `--${boundary}`;
+  const boundaryBuffer = Buffer.from(boundaryStr);
   
-  if (!libreOffice) {
-    return {
-      success: false,
-      error: "LibreOffice not available",
-      message: "This server is not configured for DOCX→PDF conversion. LibreOffice is required. " +
-        "For setup instructions, see: /docs/DOCX_TO_PDF_IMPLEMENTATION.md",
-    };
+  let idx = bodyBuffer.indexOf(boundaryBuffer);
+  if (idx === -1) return null;
+  
+  idx += boundaryBuffer.length;
+  
+  let headersEnd = bodyBuffer.indexOf("\r\n\r\n", idx);
+  if (headersEnd === -1) {
+    headersEnd = bodyBuffer.indexOf("\n\n", idx);
+    if (headersEnd === -1) return null;
+    idx = headersEnd + 2;
+  } else {
+    idx = headersEnd + 4;
   }
+  
+  let endIdx = bodyBuffer.indexOf(boundaryBuffer, idx);
+  if (endIdx === -1) return null;
+  
+  if (bodyBuffer[endIdx - 2] === 13 && bodyBuffer[endIdx - 1] === 10) {
+    endIdx -= 2;
+  } else if (bodyBuffer[endIdx - 1] === 10) {
+    endIdx -= 1;
+  }
+  
+  return bodyBuffer.slice(idx, endIdx);
+}
 
-  // Create a temporary directory for processing
-  let tempDir: string | null = null;
-  let docxPath: string | null = null;
-  let pdfPath: string | null = null;
-
+async function convertDocxToPdf(docxBuffer: Buffer): Promise<{ success: boolean; pdfBuffer?: Buffer; error?: string; message?: string }> {
   try {
-    tempDir = mkdtempSync(join(tmpdir(), "docx-convert-"));
-    docxPath = join(tempDir, "document.docx");
-    pdfPath = join(tempDir, "document.pdf");
-
-    // Write DOCX buffer to temp file
-    writeFileSync(docxPath, docxBuffer);
-
-    // Run LibreOffice headless conversion
-    // Using the export filter ensures proper PDF generation
-    const result = spawnSync(
-      libreOffice.path,
-      [
-        "--headless",
-        "--convert-to", "pdf:writer_pdf_Export:author=Lazy-PDF",
-        "--outdir", tempDir,
-        docxPath,
-      ],
-      {
-        timeout: 60000, // 60 seconds timeout
-        stdio: ["ignore", "pipe", "pipe"],
-        encoding: "utf-8",
-      }
-    );
-
-    // Log conversion attempt for debugging
-    console.log("LibreOffice conversion:", {
-      path: libreOffice.path,
-      status: result.status,
-      signal: result.signal,
-      stderr: result.stderr?.substring(0, 200),
-    });
-
-    if (result.error) {
-      return {
-        success: false,
-        error: "Process execution failed",
-        message: `Failed to execute LibreOffice: ${result.error.message}`,
-      };
-    }
-
-    if (result.status !== 0) {
-      const stderr = result.stderr?.trim() || "";
-      
-      // Common LibreOffice errors
-      if (stderr.includes("UnsupportedEncoding")) {
-        return {
-          success: false,
-          error: "Unsupported document encoding",
-          message: "The document contains unsupported character encoding.",
-        };
-      }
-
-      if (stderr.includes("Stream")) {
-        return {
-          success: false,
-          error: "Document corruption detected",
-          message: "The DOCX file appears to be corrupted or partially damaged.",
-        };
-      }
-
-      return {
-        success: false,
-        error: "Conversion failed",
-        message: stderr || `LibreOffice conversion failed (exit code ${result.status}). The document may be incompatible.`,
-      };
-    }
-
-    // Check if PDF was created
-    if (!existsSync(pdfPath)) {
-      return {
-        success: false,
-        error: "PDF not generated",
-        message: "LibreOffice did not produce a PDF output. The document may be unsupported.",
-      };
-    }
-
-    // Read and validate PDF
-    const pdfBuffer = readFileSync(pdfPath);
+    const formData = new FormData();
+    const blob = new Blob([docxBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    formData.append("file", blob, "document.docx");
     
-    if (pdfBuffer.length === 0) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
+    
+    const response = await fetch(`${CONVERTER_URL}/convert`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      let message = "Conversion failed";
+      try {
+        const data = await response.json();
+        message = data.message || data.error || message;
+      } catch {}
+      
+      return {
+        success: false,
+        error: response.status === 503 ? "Service unavailable" : "Conversion failed",
+        message,
+      };
+    }
+    
+    const pdfBuffer = await response.arrayBuffer();
+    
+    if (pdfBuffer.byteLength === 0) {
       return {
         success: false,
         error: "Empty PDF",
-        message: "The conversion produced an empty PDF. The document may be blank or corrupted.",
+        message: "The conversion produced an empty PDF.",
       };
     }
-
-    // Validate PDF magic bytes (%PDF)
-    if (pdfBuffer.length < 4 || !pdfBuffer.subarray(0, 4).equals(Buffer.from("%PDF"))) {
-      return {
-        success: false,
-        error: "Invalid PDF",
-        message: "The generated file is not a valid PDF.",
-      };
-    }
-
+    
     return {
       success: true,
-      pdfBuffer,
+      pdfBuffer: Buffer.from(pdfBuffer),
     };
   } catch (error) {
-    console.error("DOCX to PDF conversion error:", error);
+    console.error("Conversion error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    
+    if (message.includes("aborted") || message.includes("timeout")) {
+      return {
+        success: false,
+        error: "Timeout",
+        message: "The document took too long to convert. Please try a smaller document.",
+      };
+    }
+    
+    if (message.includes("fetch") || message.includes("ECONNREFUSED") || message.includes("network")) {
+      return {
+        success: false,
+        error: "Service unavailable",
+        message: "Unable to connect to conversion service. Please ensure the service is running.",
+      };
+    }
+    
     return {
       success: false,
       error: "Conversion error",
-      message: error instanceof Error ? error.message : "Unknown error during conversion.",
+      message,
     };
-  } finally {
-    // Cleanup temporary files - be aggressive to prevent disk space issues
-    try {
-      if (docxPath && existsSync(docxPath)) {
-        unlinkSync(docxPath);
-      }
-      if (pdfPath && existsSync(pdfPath)) {
-        unlinkSync(pdfPath);
-      }
-      if (tempDir && existsSync(tempDir)) {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
-    } catch (cleanupError) {
-      console.error("Error cleaning up temporary files:", cleanupError);
-      // Don't throw - cleanup errors shouldn't fail the conversion
-    }
   }
 }
 
@@ -329,10 +240,10 @@ const handler: Handler = async (event: HandlerEvent) => {
     }
 
     // Perform conversion
-    const result = await convertDocxToPdfLibreOffice(docxBuffer);
+    const result = await convertDocxToPdf(docxBuffer);
 
     if (!result.success) {
-      const statusCode = result.error === "LibreOffice not available" ? 503 : 400;
+      const statusCode = result.error === "Service unavailable" ? 503 : 400;
       return {
         statusCode,
         headers: { "Content-Type": "application/json" },

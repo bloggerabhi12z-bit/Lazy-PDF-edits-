@@ -14,7 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
 import { createTextPdf, stripHtml } from "@/lib/text-pdf";
-import { renderWordToPdfV2 } from "@/lib/docx-to-pdf-v2";
+import { renderWordToPdfMammoth } from "@/lib/docx-to-pdf-mammoth";
+import { convertPdfToWord } from "@/lib/pdf-to-word";
 import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1272,10 +1273,10 @@ export function WordToPdfTool() {
     setProgress(10);
 
     try {
-      // Client-side conversion using renderWordToPdfV2
+      // Client-side conversion using Mammoth
       setProgress(25);
-      const pdfBlob = await renderWordToPdfV2(file);
-
+      const pdfBlob = await renderWordToPdfMammoth(file);
+      
       if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
         throw new Error("The conversion produced an empty PDF.");
       }
@@ -1632,43 +1633,10 @@ function PdfTextExportTool({ type }: { type: "word" | "excel" }) {
     setBusy(true);
     try {
       if (type === "word") {
-        const pdf = await loadPdf(file);
-        const sections = [];
-        const renderScale = 1.5;
-        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-          const canvas = await renderPdfPageToCanvas(pdf, pageNumber, renderScale);
-          const image = await canvasToBlob(canvas, "image/png");
-          const pageWidthPoints = canvas.width / renderScale;
-          const pageHeightPoints = canvas.height / renderScale;
-          const imageWidth = Math.round((pageWidthPoints / 72) * 96);
-          const imageHeight = Math.round((pageHeightPoints / 72) * 96);
-          sections.push({
-            properties: {
-              page: {
-                margin: { top: 0, right: 0, bottom: 0, left: 0 },
-                size: { width: Math.round(pageWidthPoints * 20), height: Math.round(pageHeightPoints * 20) },
-              },
-            },
-            children: [
-              new Paragraph({
-                spacing: { before: 0, after: 0, line: 240 },
-                children: [
-                  new ImageRun({
-                    type: "png",
-                    data: new Uint8Array(await image.arrayBuffer()),
-                    transformation: { width: imageWidth, height: imageHeight },
-                  }),
-                ],
-              }),
-            ],
-          });
-        }
-        const doc = new Document({
-          sections,
-        });
+        const docxBlob = await convertPdfToWord(file);
         downloadBlob(
-          await Packer.toBlob(doc),
-          "lazy-pdf-pdf-text.docx",
+          docxBlob,
+          file.name.replace(/\.pdf$/i, "") + ".docx",
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         );
       } else {
