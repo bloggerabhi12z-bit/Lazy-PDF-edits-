@@ -15,7 +15,6 @@ import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
 import { createTextPdf, stripHtml } from "@/lib/text-pdf";
 import { convertPdfToWord } from "@/lib/pdf-to-word";
-import { renderWordToPdfMammoth } from "@/lib/docx-to-pdf-mammoth";
 import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1273,10 +1272,34 @@ export function WordToPdfTool() {
     setProgress(10);
 
     try {
-      // Client-side conversion using Mammoth
+      // Server-side conversion via the LibreOffice converter service —
+      // full-fidelity rendering (fonts, colors, borders, spacing, exact
+      // page count) instead of an HTML/mammoth approximation.
       setStatus("converting");
       setProgress(25);
-      const pdfBlob = await renderWordToPdfMammoth(file);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/word-to-pdf", {
+        method: "POST",
+        body: formData,
+      });
+
+      setProgress(60);
+
+      if (!response.ok) {
+        let message = "Word to PDF conversion failed.";
+        try {
+          const errorData = await response.json();
+          message = errorData.message || errorData.error || message;
+        } catch {
+          message = `Conversion service returned status ${response.status}.`;
+        }
+        throw new Error(message);
+      }
+
+      const pdfBlob = await response.blob();
       setProgress(80);
 
       if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
