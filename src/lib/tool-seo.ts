@@ -194,7 +194,7 @@ const OVERRIDES: Record<string, OverrideFn> = {
       "Convert PDF to Word online free. Turn PDF text into an editable .docx file in your browser — no upload, no sign-up, no watermark.",
     faqs: base.faqs,
   }),
-  "word-to-pdf": (base) => ({
+  "word-to-pdf": (base, tool) => ({
     h1: "Word to PDF — Convert DOCX to PDF Online Free",
     metaTitle: "Word to PDF Online Free — Convert DOCX to PDF | Lazy PDF",
     metaDescription:
@@ -221,9 +221,9 @@ const OVERRIDES: Record<string, OverrideFn> = {
       `Fast browser-based conversion`,
     ],
     howTo: [
-      { name: `Open the ${primary} tool`, text: `Head to ${P} and click ${primary}. The tool loads instantly in your browser.` },
+      { name: `Open the ${tool.name} tool`, text: `Head to ${P} and click ${tool.name}. The tool loads instantly in your browser.` },
       { name: "Upload your DOCX", text: `Drag your Word document into the upload zone, or click to browse.` },
-      { name: `Convert to PDF`, text: `Click Convert. Your DOCX is processed and the PDF is generated for preview and download.` },
+      { name: "Convert to PDF", text: `Click Convert. Your DOCX is processed and the PDF is generated for preview and download.` },
       { name: "Preview the result", text: `Review the PDF right inside the browser.` },
       { name: "Download your file", text: `Click Download to save the finished PDF.` },
     ],
