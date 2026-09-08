@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim
 
-# Install LibreOffice and required fonts
+# Install LibreOffice and fonts needed for Word-to-PDF conversion
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer \
     fonts-liberation \
@@ -8,11 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     fonts-freefont-ttf \
     fonts-opensymbol \
-    fonts-symbols \
+    fonts-symbola \
     fonts-lohit-deva \
-    fonts-lohit-hindi \
     fonts-sil-abyssinica \
-    fonts-sil-nuosu \
+    fonts-sil-nuosusil \
     fonts-tlwg-loma \
     xfonts-base \
     && apt-get clean \

@@ -1247,14 +1247,13 @@ export function WordToPdfTool() {
   async function run() {
     if (!file || busy) return;
 
-    // Validation
     if (file.size === 0) {
       toast.error("Please select a non-empty Word document.");
       return;
     }
 
-    if (file.size > 50 * 1024 * 1024) {
-      toast.error("File size exceeds 50 MB limit.");
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error("File size exceeds 4 MB limit for now — larger document support is coming soon.");
       return;
     }
 
@@ -1268,14 +1267,11 @@ export function WordToPdfTool() {
     }
 
     setBusy(true);
-    setStatus("converting");
+    setStatus("uploading");
     setProgress(10);
 
     try {
-      // Server-side conversion via the LibreOffice converter service —
-      // full-fidelity rendering (fonts, colors, borders, spacing, exact
-      // page count) instead of an HTML/mammoth approximation.
-      setStatus("converting");
+      setStatus("uploading");
       setProgress(25);
 
       const formData = new FormData();
@@ -1286,6 +1282,7 @@ export function WordToPdfTool() {
         body: formData,
       });
 
+      setStatus("converting");
       setProgress(60);
 
       if (!response.ok) {
@@ -1324,10 +1321,12 @@ export function WordToPdfTool() {
     } catch (error) {
       console.error("Word to PDF conversion failed:", error);
       setStatus("error");
-      
-      const errorMessage = error instanceof Error ? error.message : "Word to PDF conversion failed";
-      
-      // Provide helpful error messages
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Word to PDF conversion failed";
+
       if (errorMessage.includes("Unsupported")) {
         toast.error("The document contains unsupported formatting or content types.");
       } else if (errorMessage.includes("corrupted")) {

@@ -1,5 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+// LibreOffice conversion can take several seconds for larger documents —
+// extend past Vercel's short default timeout.
+export const maxDuration = 60;
+
 export const Route = createFileRoute("/api/word-to-pdf")({
   server: {
     handlers: {
@@ -24,9 +28,9 @@ export const Route = createFileRoute("/api/word-to-pdf")({
             );
           }
 
-          if (file.size > 50 * 1024 * 1024) {
+          if (file.size > 4 * 1024 * 1024) {
             return Response.json(
-              { error: "File too large", message: "File size exceeds 50 MB limit." },
+              { error: "File too large", message: "File size exceeds 4 MB limit." },
               { status: 413 }
             );
           }
@@ -34,9 +38,12 @@ export const Route = createFileRoute("/api/word-to-pdf")({
           const forwardFormData = new FormData();
           forwardFormData.append("file", file);
 
+          const converterSecret = process.env.DOCX_CONVERTER_SECRET;
+
           const response = await fetch(`${converterUrl}/convert`, {
             method: "POST",
             body: forwardFormData,
+            headers: converterSecret ? { Authorization: `Bearer ${converterSecret}` } : undefined,
           });
 
           if (!response.ok) {

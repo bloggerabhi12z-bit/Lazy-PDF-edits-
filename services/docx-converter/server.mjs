@@ -13,8 +13,9 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const PORT = Number(process.env.PORT || 8081);
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 4 * 1024 * 1024;
 const CONVERSION_TIMEOUT_MS = 90_000;
+const CONVERTER_SECRET = process.env.DOCX_CONVERTER_SECRET;
 
 const ALLOWED_ORIGINS = new Set(
   (process.env.ALLOWED_ORIGINS || "")
@@ -31,7 +32,7 @@ function corsHeaders(origin) {
   return {
     "Access-Control-Allow-Origin": allowed ? origin : "null",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Expose-Headers":
       "Content-Disposition, Content-Length",
     Vary: "Origin",
@@ -72,6 +73,13 @@ function isAllowedOrigin(origin) {
     ALLOWED_ORIGINS.size === 0 ||
     ALLOWED_ORIGINS.has(origin)
   );
+}
+
+function isAuthorized(req) {
+  if (!CONVERTER_SECRET) return true; // no secret configured — auth disabled
+  const header = req.headers["authorization"];
+  const provided = header?.replace(/^Bearer\s+/i, "");
+  return provided === CONVERTER_SECRET;
 }
 
 async function findLibreOffice() {
@@ -269,7 +277,7 @@ async function parseUpload(req) {
     MAX_FILE_SIZE + 2 * 1024 * 1024
   ) {
     const error = new Error(
-      "Request exceeds the 50 MB upload limit.",
+      "Request exceeds the 4 MB upload limit.",
     );
 
     error.code = "PAYLOAD_TOO_LARGE";
@@ -312,7 +320,7 @@ async function parseUpload(req) {
 
   if (value.size > MAX_FILE_SIZE) {
     const error = new Error(
-      "File size exceeds the 50 MB limit.",
+      "File size exceeds the 4 MB limit.",
     );
 
     error.code = "PAYLOAD_TOO_LARGE";
@@ -424,6 +432,20 @@ const server = createServer(async (req, res) => {
       {
         error: "NOT_FOUND",
         message: "Not found.",
+      },
+      origin,
+    );
+
+    return;
+  }
+
+  if (!isAuthorized(req)) {
+    sendJson(
+      res,
+      401,
+      {
+        error: "UNAUTHORIZED",
+        message: "Missing or invalid authorization.",
       },
       origin,
     );
