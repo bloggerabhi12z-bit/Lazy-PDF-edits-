@@ -1,4 +1,4 @@
-import { toCanvas } from "html-to-image";
+import html2canvas from "html2canvas";
 import { PDFDocument } from "pdf-lib";
 
 const LETTER_WIDTH = 612;
@@ -13,7 +13,13 @@ function sanitiseHtml(html: string) {
       if (attribute.name.toLowerCase().startsWith("on")) node.removeAttribute(attribute.name);
     });
   });
-  return document.body.innerHTML;
+  // A leading <style> tag in the input gets hoisted by the HTML parser into
+  // <head>, so document.body.innerHTML alone would silently drop all of it.
+  // Re-attach any <head> <style> blocks to the front of the returned markup.
+  const headStyles = Array.from(document.head.querySelectorAll("style"))
+    .map((style) => style.outerHTML)
+    .join("");
+  return headStyles + document.body.innerHTML;
 }
 
 const HOST_WIDTH = 720; // CSS px, matches padding below
@@ -59,20 +65,41 @@ function collectSafeBreaks(host: HTMLElement): number[] {
 }
 
 /** Render browser HTML to paginated PDF pages, breaking only between block
- * elements so text lines, table rows, and images are never sliced in half. */
+ * elements so text lines, table rows, and images are never sliced in half.
+ *
+ * The content is built inside an isolated, blank <iframe> rather than
+ * directly in the host page. html2canvas clones the *entire* surrounding
+ * document (including <html>/<body>) to compute stacking/clipping context
+ * correctly, so if this app's own global stylesheet is reachable it will
+ * hit our theme's oklch()/color-mix() CSS custom properties — which
+ * html2canvas cannot parse — and abort with a blank capture. A blank
+ * iframe has none of that global CSS, so this sidesteps the problem
+ * entirely instead of trying to override every inherited color.
+ */
 export async function renderHtmlPdf(html: string, title = "Document") {
-  const host = document.createElement("article");
-  host.setAttribute("aria-label", title);
-  host.style.cssText = [
-    "position:fixed", "left:-100000px", "top:0", `width:${HOST_WIDTH}px`, `padding:${HOST_PADDING}px`,
-    "box-sizing:border-box", "background:#fff", "color:#111827", "font:16px/1.5 Arial, sans-serif",
-    "overflow:visible", "word-wrap:break-word",
-  ].join(";");
-  host.innerHTML = sanitiseHtml(html);
-  document.body.appendChild(host);
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:absolute;left:-9999px;top:0;width:1px;height:1px;border:0;";
+  document.body.appendChild(iframe);
 
   try {
-    await document.fonts?.ready;
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) throw new Error("Unable to prepare an isolated render frame.");
+    iframeDoc.open();
+    iframeDoc.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body style=\"margin:0;background:#fff;\"></body></html>");
+    iframeDoc.close();
+
+    const host = iframeDoc.createElement("article");
+    host.setAttribute("aria-label", title);
+    host.style.cssText = [
+      `width:${HOST_WIDTH}px`, `padding:${HOST_PADDING}px`,
+      "box-sizing:border-box", "background:#fff", "color:#111827", "font:16px/1.5 Arial, sans-serif",
+      "overflow:visible", "word-wrap:break-word",
+    ].join(";");
+    host.innerHTML = sanitiseHtml(html);
+    iframeDoc.body.appendChild(host);
+
+    await (iframeDoc as Document & { fonts?: FontFaceSet }).fonts?.ready;
     // Let images inside the HTML finish loading before we measure/rasterize.
     const images = Array.from(host.querySelectorAll("img"));
     await Promise.all(
@@ -91,7 +118,14 @@ export async function renderHtmlPdf(html: string, title = "Document") {
     if (safeBreaksCss[safeBreaksCss.length - 1] < totalHeightCss) safeBreaksCss.push(totalHeightCss);
 
     const pixelRatio = 2; // sharper text than the previous pixelRatio:1
-    const canvas = await toCanvas(host, { backgroundColor: "#ffffff", pixelRatio, cacheBust: true });
+    const canvas = await html2canvas(host, {
+      backgroundColor: "#ffffff",
+      scale: pixelRatio,
+      useCORS: true,
+      logging: false,
+      windowWidth: host.scrollWidth,
+      windowHeight: host.scrollHeight,
+    });
     const scale = canvas.width / HOST_WIDTH; // css px -> canvas px
 
     const drawWidth = LETTER_WIDTH - PAGE_MARGIN * 2;
@@ -140,6 +174,6 @@ export async function renderHtmlPdf(html: string, title = "Document") {
 
     return new Blob([await pdf.save() as BlobPart], { type: "application/pdf" });
   } finally {
-    host.remove();
+    iframe.remove();
   }
 }

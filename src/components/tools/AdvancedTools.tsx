@@ -14,8 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { downloadBlob, formatBytes } from "@/lib/download";
 import { canvasToBlob, extractPdfText, loadPdf, renderPdfPageToCanvas } from "@/lib/pdf-render";
 import { createTextPdf, stripHtml } from "@/lib/text-pdf";
-import { renderWordToPdfMammoth } from "@/lib/docx-to-pdf-mammoth";
 import { convertPdfToWord } from "@/lib/pdf-to-word";
+import { renderWordToPdfMammoth } from "@/lib/docx-to-pdf-mammoth";
 import { FileText, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1274,25 +1274,25 @@ export function WordToPdfTool() {
 
     try {
       // Client-side conversion using Mammoth
+      setStatus("converting");
       setProgress(25);
       const pdfBlob = await renderWordToPdfMammoth(file);
-      
+      setProgress(80);
+
       if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
         throw new Error("The conversion produced an empty PDF.");
       }
 
-      // Download the PDF
       const baseName = file.name.replace(/\.docx?$/i, "").trim() || "document";
       const outputName = `${baseName}.pdf`;
 
       setProgress(90);
       downloadBlob(pdfBlob, outputName, "application/pdf");
-      
+
       setProgress(100);
       setStatus("done");
       toast.success("Word document converted to PDF successfully.");
-      
-      // Reset after a delay
+
       setTimeout(() => {
         setFile(null);
         setStatus("idle");

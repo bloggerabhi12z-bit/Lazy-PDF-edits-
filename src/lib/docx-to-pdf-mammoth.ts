@@ -58,15 +58,19 @@ export async function renderWordToPdfMammoth(file: File): Promise<Blob> {
         font-family: Arial, sans-serif;
         font-weight: 700;
         margin: 0.8em 0 0.4em;
-        color: #111827;
+        color: #9d174d;
       }
 
       h1 {
         font-size: 24px;
+        border-bottom: 2px solid #9d174d;
+        padding-bottom: 4px;
       }
 
       h2 {
         font-size: 20px;
+        border-bottom: 2px solid #9d174d;
+        padding-bottom: 4px;
       }
 
       h3 {
@@ -75,21 +79,49 @@ export async function renderWordToPdfMammoth(file: File): Promise<Blob> {
 
       p {
         margin: 0 0 0.75em;
+        white-space: pre-wrap;
       }
 
+      /* Lists */
       ul, ol {
         margin: 0 0 0.75em;
-        padding-left: 1.5em;
+        padding: 0;
+        list-style: none;
       }
 
       li {
+        position: relative;
         margin-bottom: 0.25em;
+        padding-left: 1.4em;
+      }
+
+      ul > li::before {
+        content: "•";
+        position: absolute;
+        left: 0.3em;
+        top: 0;
+      }
+
+      ol {
+        counter-reset: ol-counter;
+      }
+
+      ol > li {
+        counter-increment: ol-counter;
+      }
+
+      ol > li::before {
+        content: counter(ol-counter) ".";
+        position: absolute;
+        left: 0;
+        top: 0;
       }
 
       table {
         border-collapse: collapse;
         width: 100%;
         margin: 0 0 1em;
+        table-layout: auto;
       }
 
       table, th, td {
@@ -100,6 +132,9 @@ export async function renderWordToPdfMammoth(file: File): Promise<Blob> {
         padding: 6px 8px;
         text-align: left;
         vertical-align: top;
+        min-width: 60px;
+        overflow-wrap: normal;
+        word-break: normal;
       }
 
       img {

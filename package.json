@@ -68,7 +68,7 @@
     "input-otp": "^1.4.2",
     "jszip": "^3.10.1",
     "lucide-react": "^0.575.0",
-    "mammoth": "^1.12.0",
+    "mammoth": "^1.12.2",
     "marked": "^18.0.5",
     "pdf-lib": "^1.17.1",
     "pdf-lib-plus-encrypt": "^1.1.0",

@@ -27,6 +27,7 @@ import { Route as ToolsIndexRouteImport } from './routes/tools.index'
 import { Route as BlogIndexRouteImport } from './routes/blog.index'
 import { Route as ToolsSlugRouteImport } from './routes/tools.$slug'
 import { Route as BlogSlugRouteImport } from './routes/blog.$slug'
+import { Route as ApiWordToPdfRouteImport } from './routes/api.word-to-pdf'
 
 const ToolsRoute = ToolsRouteImport.update({
   id: '/tools',
@@ -118,6 +119,11 @@ const BlogSlugRoute = BlogSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => BlogRoute,
 } as any)
+const ApiWordToPdfRoute = ApiWordToPdfRouteImport.update({
+  id: '/api/word-to-pdf',
+  path: '/api/word-to-pdf',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms-and-conditions': typeof TermsAndConditionsRoute
   '/tools': typeof ToolsRouteWithChildren
+  '/api/word-to-pdf': typeof ApiWordToPdfRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/tools/$slug': typeof ToolsSlugRoute
   '/blog/': typeof BlogIndexRoute
@@ -152,6 +159,7 @@ export interface FileRoutesByTo {
   '/security': typeof SecurityRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms-and-conditions': typeof TermsAndConditionsRoute
+  '/api/word-to-pdf': typeof ApiWordToPdfRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/tools/$slug': typeof ToolsSlugRoute
   '/blog': typeof BlogIndexRoute
@@ -173,6 +181,7 @@ export interface FileRoutesById {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms-and-conditions': typeof TermsAndConditionsRoute
   '/tools': typeof ToolsRouteWithChildren
+  '/api/word-to-pdf': typeof ApiWordToPdfRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/tools/$slug': typeof ToolsSlugRoute
   '/blog/': typeof BlogIndexRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/terms-and-conditions'
     | '/tools'
+    | '/api/word-to-pdf'
     | '/blog/$slug'
     | '/tools/$slug'
     | '/blog/'
@@ -213,6 +223,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/sitemap.xml'
     | '/terms-and-conditions'
+    | '/api/word-to-pdf'
     | '/blog/$slug'
     | '/tools/$slug'
     | '/blog'
@@ -233,6 +244,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/terms-and-conditions'
     | '/tools'
+    | '/api/word-to-pdf'
     | '/blog/$slug'
     | '/tools/$slug'
     | '/blog/'
@@ -254,6 +266,7 @@ export interface RootRouteChildren {
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   TermsAndConditionsRoute: typeof TermsAndConditionsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
+  ApiWordToPdfRoute: typeof ApiWordToPdfRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -384,6 +397,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BlogSlugRouteImport
       parentRoute: typeof BlogRoute
     }
+    '/api/word-to-pdf': {
+      id: '/api/word-to-pdf'
+      path: '/api/word-to-pdf'
+      fullPath: '/api/word-to-pdf'
+      preLoaderRoute: typeof ApiWordToPdfRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -426,6 +446,7 @@ const rootRouteChildren: RootRouteChildren = {
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   TermsAndConditionsRoute: TermsAndConditionsRoute,
   ToolsRoute: ToolsRouteWithChildren,
+  ApiWordToPdfRoute: ApiWordToPdfRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
