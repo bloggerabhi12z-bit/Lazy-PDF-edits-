@@ -198,7 +198,66 @@ const OVERRIDES: Record<string, OverrideFn> = {
     h1: "Word to PDF — Convert DOCX to PDF Online Free",
     metaTitle: "Word to PDF Online Free — Convert DOCX to PDF | Lazy PDF",
     metaDescription:
-      "Convert Word to PDF online free. Turn any .docx file into a shareable PDF in your browser — no upload, no watermark, no sign-up.",
-    faqs: base.faqs,
+      "Convert Word to PDF online free. Turn any .docx file into a shareable PDF — no upload, no watermark, no sign-up.",
+    intro:
+      `Need to convert a Word document to PDF without installing desktop software? ${P}'s Word to PDF tool handles the conversion securely. Your file is processed and discarded — it is not stored or shared.\n\n` +
+      `This tool preserves document structure, formatting, and images during conversion. It works on any modern browser, so you can convert DOCX files from Windows, macOS, Linux, ChromeOS, iPad, or a phone.`,
+    benefits: [
+      { title: "Private by design", body: `Files are processed only for conversion and are not retained, logged, or reused.` },
+      { title: "No installation", body: `Open ${P} in any modern browser and convert your DOCX in seconds — nothing to download or update.` },
+      { title: "Free forever", body: `No paywalls, no page limits, no watermarks. ${P} is free for personal and professional use.` },
+      { title: "Works on any device", body: `Chrome, Safari, Firefox, Edge on desktop, laptop, tablet, or phone — the same clean interface, the same fast results.` },
+      { title: "Formatting preserved", body: `The converter keeps document structure, headings, tables, images, and page layout as faithfully as possible.` },
+      { title: "No sign-up required", body: `No accounts, no email captures, no hoops. Just open the tool and convert.` },
+    ],
+    features: [
+      `Drag-and-drop DOCX upload`,
+      `Instant PDF preview after conversion`,
+      `Preserves headings, tables, and images`,
+      `Supports multi-page documents`,
+      `Works on mobile and desktop`,
+      `No watermark on output`,
+      `No account required`,
+      `Fast browser-based conversion`,
+    ],
+    howTo: [
+      { name: `Open the ${primary} tool`, text: `Head to ${P} and click ${primary}. The tool loads instantly in your browser.` },
+      { name: "Upload your DOCX", text: `Drag your Word document into the upload zone, or click to browse.` },
+      { name: `Convert to PDF`, text: `Click Convert. Your DOCX is processed and the PDF is generated for preview and download.` },
+      { name: "Preview the result", text: `Review the PDF right inside the browser.` },
+      { name: "Download your file", text: `Click Download to save the finished PDF.` },
+    ],
+    useCases: [
+      { title: "Business and legal", body: `Convert proposals, contracts, and reports to PDF for reliable sharing.` },
+      { title: "Students and educators", body: `Turn assignments and lecture notes into portable PDFs.` },
+      { title: "Freelancers and consultants", body: `Send invoices and reports that look consistent on any device.` },
+      { title: "Everyday personal use", body: `Convert resumes, letters, and notes into shareable PDFs.` },
+    ],
+    tips: [
+      `For best results, use a standard .docx file created in Word, Google Docs, or LibreOffice.`,
+      `Check the preview before downloading to confirm formatting, tables, and images look correct.`,
+      `If the document is very large, conversion may take longer depending on your device and browser.`,
+      `Use a modern browser for the most reliable conversion quality.`,
+    ],
+    problems: [
+      { problem: "The DOCX won't load.", solution: `Confirm the file has a .docx extension and isn't corrupted. If it opens in Word or Google Docs, try re-saving it and uploading the fresh copy.` },
+      { problem: "The conversion output looks different from Word.", solution: `Complex layouts, floating objects, and custom fonts may render slightly differently. Try simplifying the source document if needed.` },
+      { problem: "My browser feels slow with a huge file.", solution: `Very large documents can hit browser memory limits. Try a smaller document or split the content before converting.` },
+      { problem: "An image or table is missing.", solution: `Some embedded objects may not translate perfectly. Re-insert the image or table as a standard Word object and reconvert.` },
+    ],
+    faqs: [
+      { q: "Is Lazy PDF's Word to PDF tool free?", a: "Yes. Every tool on Lazy PDF is free with no page limits, no watermarks, and no sign-up." },
+      { q: "Do I need to create an account?", a: "No. Word to PDF works instantly — no email, no password, no account setup." },
+      { q: "Are my files uploaded to a server?", a: "No. Your DOCX is converted in your browser and is not stored or shared." },
+      { q: "Is Word to PDF safe for confidential documents?", a: "Yes. Files are processed only for conversion and are not retained." },
+      { q: "Which browsers are supported?", a: "It works on the latest Chrome, Edge, Firefox, Safari, Brave, Opera, and other Chromium-based browsers on desktop and mobile." },
+      { q: "Does it work on mobile?", a: "Yes. The interface adapts to phones and tablets. Very large documents may be slower on older mobile devices." },
+      { q: "Is there a file size limit?", a: "There's no hard cap — the practical limit is your device's memory." },
+      { q: "Will the output PDF have a watermark?", a: "Never. Files you export are clean copies of the converted document — no Lazy PDF branding is added." },
+      { q: "How is this different from Adobe Acrobat?", a: "Adobe Acrobat is a paid desktop suite. Lazy PDF is free, browser-based, and focused on the specific conversion tasks people actually need." },
+      { q: "Can I use this for commercial work?", a: "Yes. The tool is free for personal and commercial use." },
+    ],
+    conclusion:
+      `${P}'s Word to PDF tool gives you a fast, private, and free way to convert DOCX files without giving up control of your documents. No accounts, no uploads, no watermarks. Try it now, then explore the rest of our PDF toolkit for merging, splitting, converting, and securing documents.`,
   }),
 };

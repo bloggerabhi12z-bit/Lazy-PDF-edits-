@@ -37,7 +37,7 @@ export function ToolShell({
             <tool.icon className="h-6 w-6 text-ink" />
           </div>
           <div className="min-w-0">
-            <h1 className="font-display text-3xl tracking-tight sm:text-4xl">{seo.h1}</h1>
+            <h1 className="font-display text-2xl tracking-tight sm:text-3xl">{seo.h1}</h1>
             <p className="mt-2 max-w-2xl text-base text-muted-foreground">{tool.description}</p>
           </div>
         </header>
@@ -67,8 +67,8 @@ const toolTabs = [
 
 function ToolTabs({ activeSlug }: { activeSlug: string }) {
   return (
-    <nav className="mt-6 border-b border-border" aria-label="PDF tool navigation">
-      <div className="flex gap-1 overflow-x-auto pb-1">
+    <nav className="-mx-4 sm:mx-0 mt-6 border-b border-border" aria-label="PDF tool navigation">
+      <div className="flex gap-1 overflow-x-auto px-4 sm:px-0 pb-1 scrollbar-hide">
         {toolTabs.map(([slug, label]) => (
           <Link key={slug} to="/tools/$slug" params={{ slug }} className={`shrink-0 rounded-t-lg border-b-2 px-3.5 py-3 text-sm font-medium transition-colors ${slug === activeSlug ? "border-signal text-signal" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"}`}>
             {label}

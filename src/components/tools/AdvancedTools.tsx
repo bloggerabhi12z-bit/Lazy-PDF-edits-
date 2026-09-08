@@ -1544,12 +1544,12 @@ function FileToPdf({
           hint="Drop a file to convert."
         />
       ) : (
-        <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-6">
-          <div>
-            <div className="font-medium">{file.name}</div>
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 sm:p-6">
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium">{file.name}</div>
             <div className="text-sm text-muted-foreground">{formatBytes(file.size)}</div>
           </div>
-          <Button variant="ghost" onClick={() => setFile(null)} disabled={busy}>
+          <Button variant="ghost" onClick={() => setFile(null)} disabled={busy} className="shrink-0">
             Change
           </Button>
         </div>
@@ -1572,10 +1572,11 @@ function FileToPdf({
         </div>
       )}
       
-      <div className="flex justify-end">
+      <div className="flex w-full justify-stretch sm:justify-end">
         <Button 
           variant="action" 
           size="xl" 
+          className="w-full sm:w-auto" 
           onClick={run} 
           disabled={!file || busy}
         >

@@ -17,7 +17,7 @@ export function ToolSeoContent({ tool, seo }: Props) {
     <div className="mt-16 space-y-16">
       {/* Introduction */}
       <section aria-labelledby="about-heading">
-        <h2 id="about-heading" className="font-display text-3xl tracking-tight">
+        <h2 id="about-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
           About {tool.name}
         </h2>
         <div className="mt-4 space-y-4 text-base leading-relaxed text-muted-foreground">
@@ -29,12 +29,12 @@ export function ToolSeoContent({ tool, seo }: Props) {
 
       {/* Benefits */}
       <section aria-labelledby="benefits-heading">
-        <h2 id="benefits-heading" className="font-display text-3xl tracking-tight">
+        <h2 id="benefits-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
           Why choose {tool.name}
         </h2>
-        <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {seo.benefits.map((b) => (
-            <div key={b.title} className="rounded-2xl border border-border bg-card p-5">
+            <div key={b.title} className="rounded-2xl border border-border bg-card p-4 sm:p-5">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-signal-soft text-signal">
                 <Shield className="h-5 w-5" />
               </div>
@@ -47,7 +47,7 @@ export function ToolSeoContent({ tool, seo }: Props) {
 
       {/* Features */}
       <section aria-labelledby="features-heading">
-        <h2 id="features-heading" className="font-display text-3xl tracking-tight">
+        <h2 id="features-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
           Features
         </h2>
         <ul className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -62,16 +62,16 @@ export function ToolSeoContent({ tool, seo }: Props) {
 
       {/* How to */}
       <section aria-labelledby="howto-heading">
-        <h2 id="howto-heading" className="font-display text-3xl tracking-tight">
+        <h2 id="howto-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
           How to {tool.name.toLowerCase()} in {seo.howTo.length} steps
         </h2>
         <ol className="mt-6 space-y-4">
           {seo.howTo.map((step, i) => (
-            <li key={step.name} className="flex gap-4 rounded-2xl border border-border bg-card p-5">
+            <li key={step.name} className="flex gap-4 rounded-2xl border border-border bg-card p-4 sm:p-5">
               <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-signal text-ink font-bold">
                 {i + 1}
               </div>
-              <div>
+              <div className="min-w-0">
                 <h3 className="font-display text-lg">{step.name}</h3>
                 <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{step.text}</p>
               </div>
@@ -82,12 +82,12 @@ export function ToolSeoContent({ tool, seo }: Props) {
 
       {/* Use cases */}
       <section aria-labelledby="usecases-heading">
-        <h2 id="usecases-heading" className="font-display text-3xl tracking-tight">
+        <h2 id="usecases-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
           Who uses {tool.name}
         </h2>
-        <div className="mt-6 grid gap-5 sm:grid-cols-2">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {seo.useCases.map((u) => (
-            <div key={u.title} className="rounded-2xl border border-border bg-card p-5">
+            <div key={u.title} className="rounded-2xl border border-border bg-card p-4 sm:p-5">
               <h3 className="font-display text-lg">{u.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{u.body}</p>
             </div>
@@ -112,12 +112,12 @@ export function ToolSeoContent({ tool, seo }: Props) {
 
       {/* Common problems */}
       <section aria-labelledby="problems-heading">
-        <h2 id="problems-heading" className="font-display text-3xl tracking-tight">
+        <h2 id="problems-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
           Common problems and fixes
         </h2>
         <div className="mt-6 space-y-3">
           {seo.problems.map((p) => (
-            <details key={p.problem} className="group rounded-2xl border border-border bg-card p-5 open:shadow-sm">
+            <details key={p.problem} className="group rounded-2xl border border-border bg-card p-4 sm:p-5 open:shadow-sm">
               <summary className="cursor-pointer list-none font-medium">
                 <span className="mr-2 text-signal">▸</span>
                 {p.problem}
@@ -131,14 +131,14 @@ export function ToolSeoContent({ tool, seo }: Props) {
       {/* FAQs */}
       <section aria-labelledby="faq-heading">
         <div className="flex items-center gap-2">
-          <HelpCircle className="h-6 w-6 text-signal" />
-          <h2 id="faq-heading" className="font-display text-3xl tracking-tight">
+          <HelpCircle className="h-5 w-5 sm:h-6 sm:w-6 text-signal" />
+          <h2 id="faq-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
             Frequently asked questions
           </h2>
         </div>
         <div className="mt-6 divide-y divide-border rounded-2xl border border-border bg-card">
           {seo.faqs.map((f) => (
-            <details key={f.q} className="group p-5 open:bg-muted/20">
+            <details key={f.q} className="group p-4 sm:p-5 open:bg-muted/20">
               <summary className="cursor-pointer list-none font-medium leading-snug">
                 <span className="mr-2 text-signal">▸</span>
                 {f.q}
@@ -151,7 +151,7 @@ export function ToolSeoContent({ tool, seo }: Props) {
 
       {/* Related tools */}
       <section aria-labelledby="related-heading">
-        <h2 id="related-heading" className="font-display text-3xl tracking-tight">
+        <h2 id="related-heading" className="font-display text-2xl tracking-tight sm:text-3xl">
           Related PDF tools
         </h2>
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -160,7 +160,7 @@ export function ToolSeoContent({ tool, seo }: Props) {
               key={r.slug}
               to="/$slug"
               params={{ slug: r.seoSlug }}
-              className="group rounded-2xl border border-border bg-card p-5 transition hover:-translate-y-0.5 hover:border-signal hover:shadow-md"
+              className="group rounded-2xl border border-border bg-card p-4 sm:p-5 transition hover:-translate-y-0.5 hover:border-signal hover:shadow-md"
             >
               <div className={`inline-grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br ${r.accentClass}`}>
                 <r.icon className="h-4 w-4 text-ink" />
@@ -177,7 +177,7 @@ export function ToolSeoContent({ tool, seo }: Props) {
 
       {/* Popular tools strip */}
       <section aria-labelledby="popular-heading">
-        <h2 id="popular-heading" className="font-display text-2xl tracking-tight">
+        <h2 id="popular-heading" className="font-display text-xl tracking-tight sm:text-2xl">
           Popular on Lazy PDF
         </h2>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -195,8 +195,8 @@ export function ToolSeoContent({ tool, seo }: Props) {
       </section>
 
       {/* Conclusion + CTA */}
-      <section className="rounded-3xl border border-border bg-gradient-to-br from-signal-soft/40 to-transparent p-8 text-center">
-        <h2 className="font-display text-3xl tracking-tight">Ready to {tool.name.toLowerCase()}?</h2>
+      <section className="rounded-3xl border border-border bg-gradient-to-br from-signal-soft/40 to-transparent p-6 text-center sm:p-8">
+        <h2 className="font-display text-2xl tracking-tight sm:text-3xl">Ready to {tool.name.toLowerCase()}?</h2>
         <p className="mx-auto mt-3 max-w-2xl text-muted-foreground">{seo.conclusion}</p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <a href="#top" className="inline-flex items-center rounded-full bg-signal px-5 py-2.5 text-sm font-medium text-ink hover:opacity-90">
