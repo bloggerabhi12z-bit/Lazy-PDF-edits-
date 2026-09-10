@@ -1395,7 +1395,7 @@ function AnnotationLayer(props: {
             onPointerDown={props.activeTool === "select" ? (e) => startMove(e, el) : undefined}
             className={cn(selected && props.activeTool === "select" && "outline outline-2 outline-[#DC2626] outline-offset-1")}>
             {body}
-            {selected && props.activeTool === "select" && props.selectedIds.size === 1 && el.type !== "draw" && el.type !== "sticky" && !el.type.startsWith("field-") && (
+            {selected && props.activeTool === "select" && props.selectedIds.size === 1 && el.type !== "draw" && !el.type.startsWith("field-") && (
               <div onPointerDown={(e) => startResize(e, el)} style={{ position: "absolute", right: -5, bottom: -5, width: 10, height: 10, borderRadius: 3, background: "#DC2626", cursor: "nwse-resize" }} />
             )}
             {canRotate && (<div onPointerDown={(e) => startRotate(e, el)} style={{ position: "absolute", left: "50%", top: -22, width: 10, height: 10, marginLeft: -5, borderRadius: "50%", background: "#DC2626", cursor: "grab" }} />)}
