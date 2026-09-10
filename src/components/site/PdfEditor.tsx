@@ -1186,7 +1186,7 @@ function AnnotationLayer(props: {
 
     // Single-click tools
     if (props.activeTool === "text") { props.onAddElementKeepTool({ id: makeId("txt"), pageId: props.pageId, type: "text", x: pt.x, y: pt.y, width: 180, height: 28, opacity: 1, rotation: 0, text: "Click to edit text", font: "Helvetica", fontSize: 14, bold: false, italic: false, underline: false, color: "#111827", align: "left", letterSpacing: 0, lineSpacing: 1.25 } as TextElement); return; }
-    if (props.activeTool === "sticky") { props.onAddElementKeepTool({ id: makeId("sticky"), pageId: props.pageId, type: "sticky", x: pt.x, y: pt.y, width: 140, height: 100, opacity: 1, rotation: 0, color: "#FEF08A", note: "" } as StickyElement); return; }
+    if (props.activeTool === "sticky") { props.onAddElement({ id: makeId("sticky"), pageId: props.pageId, type: "sticky", x: pt.x, y: pt.y, width: 140, height: 100, opacity: 1, rotation: 0, color: "#FEF08A", note: "" } as StickyElement); return; }
     if (isFieldTool) {
       const base = { id: makeId(props.activeTool), pageId: props.pageId, opacity: 1, rotation: 0, x: pt.x, y: pt.y } as const;
       let el: AnyElement | null = null;
@@ -1368,7 +1368,7 @@ function AnnotationLayer(props: {
         } else if (el.type === "sticky") {
           const st = el as StickyElement;
           body = (<div style={{ width: "100%", height: "100%", background: st.color, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, boxShadow: "0 2px 6px rgba(0,0,0,0.15)", padding: 4 * props.scale, overflow: "hidden" }}>
-            <textarea value={st.note} onChange={(e2) => props.onUpdateElement(el.id, { note: e2.target.value })} onPointerDown={(e2) => e2.stopPropagation()} placeholder="Note…" style={{ width: "100%", height: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 11 * Math.max(1, props.scale), color: "#3F3300" }} />
+            <textarea value={st.note} onChange={(e2) => props.onUpdateElement(el.id, { note: e2.target.value })} placeholder="Note…" style={{ width: "100%", height: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 11 * Math.max(1, props.scale), color: "#3F3300" }} />
           </div>);
         } else if (el.type === "field-text") {
           const f = el as FieldTextElement;
