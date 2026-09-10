@@ -1022,37 +1022,55 @@ export function UnlockPdfTool() {
 
 export function SignPdfTool() {
   const [file, setFile] = useState<File | null>(null);
-  const [signature, setSignature] = useState("Signature");
   const [busy, setBusy] = useState(false);
-  async function run() {
+
+  async function apply(_state: EditorApplyState) {
     if (!file) return;
+
     setBusy(true);
+
     try {
-      const doc = await PDFDocument.load(new Uint8Array(await file.arrayBuffer()));
-      const font = await doc.embedFont(StandardFonts.TimesRomanItalic);
-      const page = doc.getPages()[0];
-      page?.drawText(signature, { x: 72, y: 96, size: 28, font, color: rgb(0.05, 0.11, 0.18) });
-      downloadBlob(await doc.save(), `lazy-pdf-signed-${file.name}`);
-      toast.success("Signature added.");
+      const doc = await PDFDocument.load(
+        new Uint8Array(await file.arrayBuffer()),
+      );
+
+      const bytes = await doc.save();
+
+      return {
+        blob: new Blob([bytes as BlobPart], {
+          type: "application/pdf",
+        }),
+        filename: `lazy-pdf-signed-${file.name}`,
+      };
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Sign failed.");
+      toast.error(
+        error instanceof Error ? error.message : "Sign failed.",
+      );
     } finally {
       setBusy(false);
     }
   }
+
   return (
     <div className="space-y-6">
-      <SinglePdfPicker
-        file={file}
-        onFile={setFile}
-        hint="Drop a PDF and type a signature for the first page."
-      />
-      {file && <Input value={signature} onChange={(event) => setSignature(event.target.value)} />}
-      <div className="flex justify-end">
-        <Button variant="action" size="xl" onClick={run} disabled={!file || !signature || busy}>
-          {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Sign PDF
-        </Button>
-      </div>
+      {!file ? (
+        <DropZone
+          onFiles={(files) => setFile(files[0] ?? null)}
+          accept={{ "application/pdf": [".pdf"] }}
+          multiple={false}
+          hint="Drop a PDF to open the signing workspace."
+        />
+      ) : (
+        <PdfEditor
+          file={file}
+          mode="select"
+          actionLabel="Sign PDF"
+          busy={busy}
+          selectionHint="Add your signature, position it on the page, and save the signed PDF."
+          onReplace={() => setFile(null)}
+          onApply={apply}
+        />
+      )}
     </div>
   );
 }
