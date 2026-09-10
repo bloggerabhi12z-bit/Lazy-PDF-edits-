@@ -1416,19 +1416,28 @@ function AnnotationLayer(props: {
 }
 
 /* =========================================================  SIGNATURE MODAL  ========================================================= */
-function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: {
-  onInsert: (src: string, save: boolean) => void; onCancel: () => void;
-  savedSignatures: SavedSignature[]; onDeleteSaved: (id: string) => void;
+function SignatureModal({
+  onInsert,
+  onCancel,
+  savedSignatures,
+  onDeleteSaved,
+}: {
+  onInsert: (src: string, save: boolean) => void;
+  onCancel: () => void;
+  savedSignatures: SavedSignature[];
+  onDeleteSaved: (id: string) => void;
 }) {
-  const [tab, setTab] = useState<"draw" | "type" | "saved">("draw");
+  const [tab, setTab] = useState<"draw" | "type" | "upload" | "saved">("draw");
   const [typedName, setTypedName] = useState("");
   const [sigFont, setSigFont] = useState("Dancing Script");
   const [sigColor, setSigColor] = useState("#111827");
   const [sigSize, setSigSize] = useState(52);
   const [saveAfterInsert, setSaveAfterInsert] = useState(true);
   const [hasDrawing, setHasDrawing] = useState(false);
-  
+  const [uploadedSignature, setUploadedSignature] = useState<string | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const uploadSignatureInputRef = useRef<HTMLInputElement | null>(null);
   const isDrawing = useRef(false);
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
   const dprRef = useRef(1);
@@ -1437,81 +1446,127 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
     SIG_FONTS.forEach(({ family }) => {
       const link = document.createElement("link");
       link.rel = "stylesheet";
-      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, "+")}:wght@400;700&display=swap`;
+      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(
+        family
+      ).replace(/%20/g, "+")}:wght@400;700&display=swap`;
       document.head.appendChild(link);
     });
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-    dprRef.current = dpr;
-    const cssW = canvas.clientWidth || 460;
-    const cssH = canvas.clientHeight || 160;
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    const ctx = canvas.getContext("2d");
-    if (ctx) ctx.scale(dpr, dpr);
+
+    const setupCanvas = () => {
+      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+      const cssW = canvas.clientWidth || 460;
+      const cssH = canvas.clientHeight || 160;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      dprRef.current = dpr;
+      ctx.scale(dpr, dpr);
+      ctx.setLineDash([]);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    };
+
+    const raf = requestAnimationFrame(setupCanvas);
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   function getPointerPos(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.preventDefault();
+
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     canvas.setPointerCapture(e.pointerId);
     isDrawing.current = true;
+
     const pos = getPointerPos(e);
     lastPoint.current = pos;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
     ctx.strokeStyle = sigColor;
     ctx.fillStyle = sigColor;
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
+
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, 1.25, 0, Math.PI * 2);
     ctx.fill();
+
     setHasDrawing(true);
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!isDrawing.current || !lastPoint.current) return;
+
     e.preventDefault();
+
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
     const pos = getPointerPos(e);
     const prev = lastPoint.current;
+
     const midX = (prev.x + pos.x) / 2;
     const midY = (prev.y + pos.y) / 2;
+
     ctx.strokeStyle = sigColor;
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
+
     ctx.beginPath();
     ctx.moveTo(prev.x, prev.y);
-    ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+    ctx.quadraticCurveTo(
+      prev.x,
+      prev.y,
+      midX,
+      midY
+    );
     ctx.stroke();
+
     lastPoint.current = pos;
   }
 
   function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
     isDrawing.current = false;
     lastPoint.current = null;
+
     const canvas = canvasRef.current;
+
     if (canvas && e.pointerId != null) {
-      try { canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch {
+        // Already released
+      }
     }
   }
 
@@ -1523,44 +1578,151 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
   function clearCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width / dprRef.current, canvas.height / dprRef.current);
+
+    ctx.clearRect(
+      0,
+      0,
+      canvas.width / dprRef.current,
+      canvas.height / dprRef.current
+    );
+
     setHasDrawing(false);
+  }
+
+  function handleSignatureUpload(file: File | undefined) {
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Signature image must be smaller than 5 MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      setUploadedSignature(String(reader.result));
+    };
+
+    reader.onerror = () => {
+      toast.error("Could not read the signature image.");
+    };
+
+    reader.readAsDataURL(file);
   }
 
   async function handleInsert() {
     if (tab === "draw") {
-      if (!hasDrawing) { toast.error("Please draw your signature first."); return; }
-      const canvas = canvasRef.current; if (!canvas) return;
-      onInsert(canvas.toDataURL("image/png"), saveAfterInsert);
-    } else if (tab === "type") {
+      if (!hasDrawing) {
+        toast.error("Please draw your signature first.");
+        return;
+      }
+
+      const canvas = canvasRef.current;
+
+      if (!canvas) return;
+
+      onInsert(
+        canvas.toDataURL("image/png"),
+        saveAfterInsert
+      );
+
+      return;
+    }
+
+    if (tab === "type") {
       const name = typedName.trim() || "Signature";
+
       const canvas = document.createElement("canvas");
-      canvas.width = 480; canvas.height = 140;
-      const ctx = canvas.getContext("2d"); if (!ctx) return;
+
+      canvas.width = 480;
+      canvas.height = 140;
+
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) return;
+
       await document.fonts.ready;
+
       ctx.font = `${sigSize}px '${sigFont}', cursive`;
-      ctx.fillStyle = sigColor; ctx.textBaseline = "middle";
+      ctx.fillStyle = sigColor;
+      ctx.textBaseline = "middle";
+
       const w = ctx.measureText(name).width;
-      ctx.fillText(name, Math.max(8, (480 - w) / 2), 70);
-      onInsert(canvas.toDataURL("image/png"), saveAfterInsert);
+
+      ctx.fillText(
+        name,
+        Math.max(8, (480 - w) / 2),
+        70
+      );
+
+      onInsert(
+        canvas.toDataURL("image/png"),
+        saveAfterInsert
+      );
+
+      return;
+    }
+
+    if (tab === "upload") {
+      if (!uploadedSignature) {
+        toast.error("Please upload your signature image first.");
+        return;
+      }
+
+      onInsert(
+        uploadedSignature,
+        saveAfterInsert
+      );
     }
   }
 
   return (
-    <div className="fixed inset-0 z-[999999] grid place-items-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
-      <div className="w-full max-w-lg rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-2xl" onClick={(e: ReactMouseEvent) => e.stopPropagation()}>
-        <div className="mb-4 text-lg font-bold text-gray-900 dark:text-gray-100">Add signature</div>
+    <div
+      className="fixed inset-0 z-[999999] grid place-items-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-xl rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-2xl"
+        onClick={(e: ReactMouseEvent) => e.stopPropagation()}
+      >
+        {/* TITLE */}
+        <div className="mb-4 text-lg font-bold text-gray-900 dark:text-gray-100">
+          Add signature
+        </div>
 
-        <div className="mb-4 flex gap-1 border-b border-gray-200 dark:border-gray-800">
-          {(["draw","type","saved"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={cn("flex-1 pb-2 text-sm font-semibold transition-all border-b-2", tab === t ? "border-[#DC2626] text-[#DC2626]" : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-300")}>
-              {t === "saved" ? `Saved (${savedSignatures.length})` : t.charAt(0).toUpperCase() + t.slice(1)}
+        {/* TABS */}
+        <div className="mb-5 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-800">
+          {(
+            ["draw", "type", "upload", "saved"] as const
+          ).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                "flex-1 min-w-[90px] whitespace-nowrap pb-2 text-sm font-semibold transition-all border-b-2",
+                tab === t
+                  ? "border-[#DC2626] text-[#DC2626]"
+                  : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-300"
+              )}
+            >
+              {t === "saved"
+                ? `Saved (${savedSignatures.length})`
+                : t === "upload"
+                  ? "Upload"
+                  : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
 
+        {/* DRAW */}
         {tab === "draw" && (
           <div>
             <canvas
@@ -1573,70 +1735,255 @@ function SignatureModal({ onInsert, onCancel, savedSignatures, onDeleteSaved }: 
               onPointerLeave={onPointerUp}
               onPointerCancel={onPointerCancel}
             />
+
             <div className="mt-3 flex items-center gap-3">
-              <label className="text-xs text-gray-500">Ink color</label>
-              <input type="color" value={sigColor} onChange={(e) => setSigColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer border border-gray-200" />
-              <button onClick={clearCanvas} className="ml-auto text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 font-medium">Clear</button>
+              <label className="text-xs text-gray-500">
+                Ink color
+              </label>
+
+              <input
+                type="color"
+                value={sigColor}
+                onChange={(e) => setSigColor(e.target.value)}
+                className="w-8 h-8 rounded cursor-pointer border border-gray-200"
+              />
+
+              <button
+                onClick={clearCanvas}
+                className="ml-auto text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 font-medium"
+              >
+                Clear
+              </button>
             </div>
           </div>
         )}
 
+        {/* TYPE */}
         {tab === "type" && (
           <div className="space-y-4">
-            <input autoFocus value={typedName} onChange={(e) => setTypedName(e.target.value)} placeholder="Type your name"
+            <input
+              autoFocus
+              value={typedName}
+              onChange={(e) => setTypedName(e.target.value)}
+              placeholder="Type your name"
               className="w-full h-16 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 text-center focus:outline-none focus:border-[#DC2626] transition-colors"
-              style={{ fontFamily: `'${sigFont}', cursive`, fontSize: Math.min(sigSize * 0.7, 42), color: sigColor }} />
+              style={{
+                fontFamily: `'${sigFont}', cursive`,
+                fontSize: Math.min(sigSize * 0.7, 42),
+                color: sigColor,
+              }}
+            />
+
             <div>
-              <div className="text-xs font-medium text-gray-500 mb-2">Style</div>
+              <div className="text-xs font-medium text-gray-500 mb-2">
+                Style
+              </div>
+
               <div className="grid grid-cols-3 gap-2">
                 {SIG_FONTS.map((f) => (
-                  <button key={f.family} onClick={() => setSigFont(f.family)}
-                    className={cn("py-3 px-2 rounded-lg border text-center transition-all overflow-hidden min-h-[56px]", sigFont === f.family ? "border-[#DC2626] bg-red-50 dark:bg-red-900/20" : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800")}
-                    style={{ fontFamily: `'${f.family}', cursive`, fontSize: 22, color: sigColor }}>
+                  <button
+                    key={f.family}
+                    onClick={() => setSigFont(f.family)}
+                    className={cn(
+                      "py-3 px-2 rounded-lg border text-center transition-all overflow-hidden min-h-[56px]",
+                      sigFont === f.family
+                        ? "border-[#DC2626] bg-red-50 dark:bg-red-900/20"
+                        : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    )}
+                    style={{
+                      fontFamily: `'${f.family}', cursive`,
+                      fontSize: 22,
+                      color: sigColor,
+                    }}
+                  >
                     {typedName || "Sign"}
                   </button>
                 ))}
               </div>
             </div>
+
             <div className="flex items-center gap-3 flex-wrap">
-              <label className="text-xs text-gray-500">Color</label>
-              <input type="color" value={sigColor} onChange={(e) => setSigColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer border border-gray-200" />
-              <label className="text-xs text-gray-500 ml-2">Size</label>
-              <input type="range" min={24} max={80} value={sigSize} onChange={(e) => setSigSize(Number(e.target.value))} className="flex-1 min-w-[80px] accent-[#DC2626]" />
+              <label className="text-xs text-gray-500">
+                Color
+              </label>
+
+              <input
+                type="color"
+                value={sigColor}
+                onChange={(e) => setSigColor(e.target.value)}
+                className="w-8 h-8 rounded cursor-pointer border border-gray-200"
+              />
+
+              <label className="text-xs text-gray-500 ml-2">
+                Size
+              </label>
+
+              <input
+                type="range"
+                min={24}
+                max={80}
+                value={sigSize}
+                onChange={(e) =>
+                  setSigSize(Number(e.target.value))
+                }
+                className="flex-1 min-w-[80px] accent-[#DC2626]"
+              />
             </div>
           </div>
         )}
 
+        {/* UPLOAD */}
+        {tab === "upload" && (
+          <div className="space-y-4">
+            <input
+              ref={uploadSignatureInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={(e) => {
+                handleSignatureUpload(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+
+            {!uploadedSignature ? (
+              <button
+                type="button"
+                onClick={() =>
+                  uploadSignatureInputRef.current?.click()
+                }
+                className="w-full rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-6 py-12 text-center hover:border-[#DC2626] hover:bg-red-50/50 dark:hover:bg-red-900/10 transition-colors"
+              >
+                <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+                  <ImageIcon className="h-6 w-6 text-[#DC2626]" />
+                </div>
+
+                <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  Upload signature image
+                </div>
+
+                <div className="mt-1 text-xs text-gray-500">
+                  PNG, JPG, WEBP or SVG · Max 5 MB
+                </div>
+              </button>
+            ) : (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-xs font-semibold text-gray-500">
+                    Signature preview
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setUploadedSignature(null)}
+                    className="text-xs font-semibold text-gray-500 hover:text-red-600"
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div className="flex min-h-40 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-5">
+                  <img
+                    src={uploadedSignature}
+                    alt="Uploaded signature preview"
+                    className="max-h-32 max-w-full object-contain"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    uploadSignatureInputRef.current?.click()
+                  }
+                  className="mt-3 w-full rounded-lg border border-gray-200 dark:border-gray-700 py-2 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Choose another image
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SAVED */}
         {tab === "saved" && (
           <div className="grid max-h-64 grid-cols-2 gap-3 overflow-auto">
-            {savedSignatures.length === 0 && <div className="col-span-2 py-8 text-center text-sm text-gray-500">No saved signatures yet.</div>}
+            {savedSignatures.length === 0 && (
+              <div className="col-span-2 py-8 text-center text-sm text-gray-500">
+                No saved signatures yet.
+              </div>
+            )}
+
             {savedSignatures.map((s) => (
-              <div key={s.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2">
-                <img src={s.src} alt="Saved signature" className="h-16 w-full object-contain mb-2" />
+              <div
+                key={s.id}
+                className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2"
+              >
+                <img
+                  src={s.src}
+                  alt="Saved signature"
+                  className="h-16 w-full object-contain mb-2"
+                />
+
                 <div className="flex gap-1">
-                  <button onClick={() => onInsert(s.src, false)} className="flex-1 py-1.5 rounded bg-[#DC2626] text-xs font-bold text-white hover:bg-[#B91C1C]">Insert</button>
-                  <button onClick={() => onDeleteSaved(s.id)} className="w-8 flex items-center justify-center rounded border border-gray-200 text-gray-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button
+                    onClick={() => onInsert(s.src, false)}
+                    className="flex-1 py-1.5 rounded bg-[#DC2626] text-xs font-bold text-white hover:bg-[#B91C1C]"
+                  >
+                    Insert
+                  </button>
+
+                  <button
+                    onClick={() => onDeleteSaved(s.id)}
+                    className="w-8 flex items-center justify-center rounded border border-gray-200 text-gray-500 hover:text-red-600 hover:bg-red-50"
+                    title="Delete saved signature"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         )}
 
+        {/* SAVE FOR LATER */}
         {tab !== "saved" && (
-          <label className="mt-3 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" checked={saveAfterInsert} onChange={(e) => setSaveAfterInsert(e.target.checked)} className="accent-[#DC2626] w-4 h-4" /> Save signature for later
+          <label className="mt-4 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={saveAfterInsert}
+              onChange={(e) =>
+                setSaveAfterInsert(e.target.checked)
+              }
+              className="accent-[#DC2626] w-4 h-4"
+            />
+
+            Save signature for later
           </label>
         )}
 
+        {/* ACTIONS */}
         <div className="mt-6 flex justify-end gap-2">
-          <Button variant="outline" onClick={onCancel} className="rounded-lg border-gray-300 dark:border-gray-700 font-semibold">Cancel</Button>
-          {tab !== "saved" && <Button onClick={handleInsert} className="rounded-lg bg-[#DC2626] text-white hover:bg-[#B91C1C] font-bold px-6">Insert</Button>}
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            className="rounded-lg border-gray-300 dark:border-gray-700 font-semibold"
+          >
+            Cancel
+          </Button>
+
+          {tab !== "saved" && (
+            <Button
+              onClick={handleInsert}
+              className="rounded-lg bg-[#DC2626] text-white hover:bg-[#B91C1C] font-bold px-6"
+            >
+              Insert
+            </Button>
+          )}
         </div>
       </div>
     </div>
   );
 }
-
 /* =========================================================  SUCCESS SCREEN  ========================================================= */
 function SuccessScreen({ result, onDownload, onEditAgain, onNewFile }: { result: { blob: Blob; filename: string; thumb: string | null; pages: number }; onDownload: () => void; onEditAgain: () => void; onNewFile: () => void }) {
   return (
