@@ -1440,6 +1440,7 @@ function SignatureModal({
   const uploadSignatureInputRef = useRef<HTMLInputElement | null>(null);
   const isDrawing = useRef(false);
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
+  const canvasRectRef = useRef<DOMRect | null>(null);
   const dprRef = useRef(1);
 
   useEffect(() => {
@@ -1481,8 +1482,11 @@ function SignatureModal({
   }, []);
 
   function getPointerPos(e: React.PointerEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
+    const rect = canvasRectRef.current;
+
+    if (!rect) {
+      return { x: 0, y: 0 };
+    }
 
     return {
       x: e.clientX - rect.left,
@@ -1495,6 +1499,9 @@ function SignatureModal({
 
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // Cache the canvas position for the entire stroke.
+    canvasRectRef.current = canvas.getBoundingClientRect();
 
     canvas.setPointerCapture(e.pointerId);
     isDrawing.current = true;
@@ -1512,6 +1519,7 @@ function SignatureModal({
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
 
+    // Draw the initial dot so a short click still creates a mark.
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, 1.25, 0, Math.PI * 2);
     ctx.fill();
@@ -1525,16 +1533,12 @@ function SignatureModal({
     e.preventDefault();
 
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const rect = canvasRectRef.current;
+
+    if (!canvas || !rect) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    const pos = getPointerPos(e);
-    const prev = lastPoint.current;
-
-    const midX = (prev.x + pos.x) / 2;
-    const midY = (prev.y + pos.y) / 2;
 
     ctx.strokeStyle = sigColor;
     ctx.lineWidth = 2.5;
@@ -1542,14 +1546,27 @@ function SignatureModal({
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
 
+    const nativeEvent = e.nativeEvent;
+
+    const events =
+      typeof (nativeEvent as PointerEvent).getCoalescedEvents === "function"
+        ? (nativeEvent as PointerEvent).getCoalescedEvents()
+        : [nativeEvent];
+
     ctx.beginPath();
-    ctx.moveTo(prev.x, prev.y);
-    ctx.quadraticCurveTo(
-      prev.x,
-      prev.y,
-      midX,
-      midY
-    );
+    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+
+    let pos = lastPoint.current;
+
+    for (const event of events) {
+      pos = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+
+      ctx.lineTo(pos.x, pos.y);
+    }
+
     ctx.stroke();
 
     lastPoint.current = pos;
@@ -1558,6 +1575,7 @@ function SignatureModal({
   function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
     isDrawing.current = false;
     lastPoint.current = null;
+    canvasRectRef.current = null;
 
     const canvas = canvasRef.current;
 
@@ -1565,7 +1583,7 @@ function SignatureModal({
       try {
         canvas.releasePointerCapture(e.pointerId);
       } catch {
-        // Already released
+        // Pointer capture may already be released.
       }
     }
   }
@@ -1573,6 +1591,7 @@ function SignatureModal({
   function onPointerCancel() {
     isDrawing.current = false;
     lastPoint.current = null;
+    canvasRectRef.current = null;
   }
 
   function clearCanvas() {
@@ -1589,6 +1608,9 @@ function SignatureModal({
       canvas.height / dprRef.current
     );
 
+    isDrawing.current = false;
+    lastPoint.current = null;
+    canvasRectRef.current = null;
     setHasDrawing(false);
   }
 
