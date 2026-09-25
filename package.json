@@ -73,6 +73,7 @@
     "pdf-lib": "^1.17.1",
     "pdf-lib-plus-encrypt": "^1.1.0",
     "pdfjs-dist": "^6.1.200",
+    "perfect-freehand": "^1.2.3",
     "pptxgenjs": "^4.0.1",
     "qpdf-wasm": "^0.1.0",
     "react": "^19.2.0",
@@ -80,6 +81,7 @@
     "react-dom": "^19.2.0",
     "react-dropzone": "^15.0.0",
     "react-hook-form": "^7.71.2",
+    "react-moveable": "^0.56.0",
     "react-resizable-panels": "^4.6.5",
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
@@ -94,6 +96,7 @@
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@lovable.dev/vite-tanstack-config": "^2.8.2",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

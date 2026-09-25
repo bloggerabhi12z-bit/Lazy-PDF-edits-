@@ -1,446 +1,3060 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
-import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  AlignLeft, AlignCenter, AlignRight, ArrowLeft, ArrowLeftRight, ArrowRight,
-  Bold, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser,
-  FileCheck2, FilePlus, Hand, Highlighter, Image as ImageIcon, Italic,
-  Loader2, Lock, Maximize2, MessageSquare, MoreHorizontal, MousePointer2,
-  PenLine, PenTool, Plus, Redo2, RotateCw, Search, Square, Star,
-  Trash2, Triangle, Type, Underline as UnderlineIcon, Undo2, X, ChevronDown, Minus,
-  Layers, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, Lock } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { formatBytes } from "@/lib/download";
 import { publishResult } from "@/lib/result-store";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import {
-  FONT_OPTIONS, ROTATABLE_TYPES, deleteSavedSignature, getSavedSignatures, makeId, saveSignature, stampElements,
-  type AnyElement, type DrawElement, type FieldCheckboxElement, type FieldDropdownElement,
-  type FieldRadioElement, type FieldTextElement, type HighlightElement, type ImageElement,
-  type SavedSignature, type ShapeElement, type StickyElement, type TextElement,
+  FONT_OPTIONS,
+  makeId,
+  deleteSavedSignature,
+  getSavedSignatures,
+  saveSignature,
+  stampElements,
+  type AnyElement,
+  type ImageElement,
+  type SavedSignature,
+  type TextElement,
 } from "@/lib/pdf-annotations";
+import { pickFile } from "@/lib/file-picker";
+import { loadGoogleFontData } from "@/lib/google-font-data";
+import { EditorCanvas } from "./EditorCanvas";
+import { EditorErrorBoundary } from "./EditorErrorBoundary";
+import { SignatureModal } from "./SignatureModal";
+import { Toolbar } from "./Toolbar";
+import {
+  clearEditorDraft,
+  loadEditorDraft,
+  makeEditorFileKey,
+  useEditorDraftAutosave,
+} from "./hooks/useEditorDraft";
+import { useEditorHistory } from "./hooks/useEditorHistory";
+import type {
+  EditorApplyResult,
+  EditorApplyState,
+  EditorPage,
+  Phase,
+  ShapeDefaults,
+  Tool,
+} from "./editor-types";
 
-export type EditorPage = { id: string; originalIndex: number; rotation: number; selected: boolean; isBlank?: boolean };
-export type EditorApplyState = { pages: EditorPage[]; selectedIds: Set<string> };
-export type EditorApplyResult = { blob: Blob; filename: string } | void | undefined;
+export type {
+  EditorApplyResult,
+  EditorApplyState,
+  EditorPage,
+  Phase,
+  ShapeDefaults,
+  Tool,
+} from "./editor-types";
 
 type PdfPage = {
-  getViewport: (o: { scale: number; rotation?: number }) => { width: number; height: number };
-  render: (o: { canvas: HTMLCanvasElement; canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> };
-  getTextContent?: () => Promise<{ items: { str: string }[] }>;
-};
-type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
-type Phase = "reading" | "rendering" | "ready" | "error";
-type Tool =
-  | "select" | "hand" | "text" | "draw" | "eraser"
-  | "shape-rect" | "shape-ellipse" | "shape-line" | "shape-arrow"
-  | "shape-triangle" | "shape-star" | "shape-rounded-rect" | "shape-speech"
-  | "highlight" | "underline" | "strikeout" | "squiggly"
-  | "image" | "signature" | "whiteout" | "sticky"
-  | "field-text" | "field-checkbox" | "field-radio" | "field-dropdown";
+  getViewport: (options: {
+    scale: number;
+    rotation?: number;
+  }) => {
+    width: number;
+    height: number;
+  };
 
-const PERSISTENT_TOOLS = new Set<Tool>(["select", "hand", "draw", "eraser"]);
-function isOneShotTool(tool: Tool): boolean {
-  return !PERSISTENT_TOOLS.has(tool);
-}
-
-const MAX_HISTORY = 50;
-const NUDGE = 1, NUDGE_FAST = 10;
-
-const SYSTEM_FONT_FAMILIES = [
-  "Helvetica","Arial","Times New Roman","Georgia","Courier New","Verdana","Tahoma",
-  "Trebuchet MS","Palatino","Garamond","Book Antiqua","Century Gothic","Franklin Gothic Medium",
-  "Lucida Console","Lucida Sans Unicode","Segoe UI","Calibri","Cambria","Consolas","Impact",
-  "Comic Sans MS","Rockwell","Baskerville","Optima","Didot","Futura",
-];
-const GOOGLE_FONT_FAMILIES = [
-  "Roboto","Open Sans","Lato","Montserrat","Poppins","Inter","Merriweather","Playfair Display",
-  "Nunito","Raleway","Ubuntu","PT Serif","Source Sans Pro","Oswald","Noto Sans","Work Sans",
-  "Fira Sans","Rubik","Karla","Quicksand","Josefin Sans","Crimson Text","Libre Baskerville",
-  "EB Garamond","Cormorant Garamond","DM Sans","Space Grotesk","Bitter","Zilla Slab",
-  "IBM Plex Sans","IBM Plex Serif","IBM Plex Mono","Roboto Mono","JetBrains Mono",
-  "Caveat","Pacifico","Dancing Script","Great Vibes","Shadows Into Light","Indie Flower",
-];
-const FONT_PREVIEW_CHOICES = [...SYSTEM_FONT_FAMILIES, ...GOOGLE_FONT_FAMILIES];
-
-const SIG_FONTS = [
-  { family: "Dancing Script", label: "Elegant" },
-  { family: "Great Vibes", label: "Formal" },
-  { family: "Pacifico", label: "Bold" },
-  { family: "Caveat", label: "Casual" },
-  { family: "Shadows Into Light", label: "Written" },
-  { family: "Indie Flower", label: "Fun" },
-];
-
-function fontFamilyStack(name: string): string {
-  const serif = ["Times New Roman","Georgia","Palatino","Garamond","Book Antiqua","Cambria","Baskerville","Didot","PT Serif","Merriweather","Playfair Display","Crimson Text","Libre Baskerville","EB Garamond","Cormorant Garamond","Bitter","Zilla Slab","IBM Plex Serif"];
-  const mono = ["Courier New","Lucida Console","Consolas","Roboto Mono","JetBrains Mono","IBM Plex Mono"];
-  const script = ["Caveat","Pacifico","Dancing Script","Great Vibes","Shadows Into Light","Indie Flower"];
-  const fallback = serif.includes(name) ? "serif" : mono.includes(name) ? "monospace" : script.includes(name) ? "cursive" : "sans-serif";
-  return `"${name}", ${fallback}`;
-}
-
-type HistorySnapshot = { pages: EditorPage[]; elements: AnyElement[] };
-function snapshotsEqual(a: HistorySnapshot, b: HistorySnapshot) { return JSON.stringify(a) === JSON.stringify(b); }
-
-function eraseFromDrawElements(
-  eraserPt: { x: number; y: number }, radius: number, drawEls: DrawElement[]
-): { toRemove: string[]; toAdd: DrawElement[] } {
-  const toRemove: string[] = [], toAdd: DrawElement[] = [];
-  for (const el of drawEls) {
-    const margin = radius + 1;
-    if (eraserPt.x < el.x - margin || eraserPt.x > el.x + el.width + margin ||
-        eraserPt.y < el.y - margin || eraserPt.y > el.y + el.height + margin) continue;
-    const hasHit = el.points.some((p) => Math.hypot(p.x + el.x - eraserPt.x, p.y + el.y - eraserPt.y) <= radius);
-    if (!hasHit) continue;
-    toRemove.push(el.id);
-    const segments: { x: number; y: number }[][] = [];
-    let current: { x: number; y: number }[] = [];
-    for (const p of el.points) {
-      if (Math.hypot(p.x + el.x - eraserPt.x, p.y + el.y - eraserPt.y) <= radius) {
-        if (current.length >= 2) segments.push([...current]);
-        current = [];
-      } else current.push(p);
-    }
-    if (current.length >= 2) segments.push(current);
-    for (const seg of segments) {
-      const absXs = seg.map((p) => p.x + el.x), absYs = seg.map((p) => p.y + el.y);
-      const minX = Math.min(...absXs), minY = Math.min(...absYs);
-      const maxX = Math.max(...absXs), maxY = Math.max(...absYs);
-      toAdd.push({ ...el, id: makeId("draw"), x: minX, y: minY,
-        width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY),
-        points: seg.map((p) => ({ x: p.x + el.x - minX, y: p.y + el.y - minY })) });
-    }
-  }
-  return { toRemove, toAdd };
-}
-
-function starSvgPoints(cx: number, cy: number, outerR: number, innerR: number): string {
-  return Array.from({ length: 10 }, (_, i) => {
-    const angle = (i * Math.PI) / 5 - Math.PI / 2;
-    const r = i % 2 === 0 ? outerR : innerR;
-    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
-  }).join(" ");
-}
-
-export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, onApply }: {
-  file: File; mode: string; actionLabel: string; busy?: boolean; selectionHint?: string;
-  onReplace: () => void; onApply: (state: EditorApplyState) => Promise<EditorApplyResult> | EditorApplyResult;
-}) {
-  const [pdf, setPdf] = useState<PdfDoc | null>(null);
-  const [pages, setPages] = useState<EditorPage[]>([]);
-  const [elements, setElements] = useState<AnyElement[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [activeTool, setActiveTool] = useState<Tool>("select");
-  const [activeShape, setActiveShape] = useState<Tool>("shape-rect");
-  const [showShapePicker, setShowShapePicker] = useState(false);
-  
-  const [drawStroke, setDrawStroke] = useState<{ color: string; width: number }>({ color: "#DC2626", width: 2 });
-  const [eraserSize, setEraserSize] = useState(15);
-  
-  const BRUSH_PRESETS = [
-    { label: "Fine", size: 1 },
-    { label: "Small", size: 2 },
-    { label: "Medium", size: 4 },
-    { label: "Large", size: 8 },
-    { label: "Extra Large", size: 12 },
-    { label: "Very Large", size: 20 },
-  ];
-  const ERASER_PRESETS = [5, 10, 15, 20, 30, 40, 60];
-  const HIGHLIGHT_COLORS = [
-    { label: "Yellow", value: "#FDE047" },
-    { label: "Green", value: "#86EFAC" },
-    { label: "Blue", value: "#93C5FD" },
-    { label: "Pink", value: "#F9A8D4" },
-    { label: "Orange", value: "#FDBA74" },
-    { label: "Purple", value: "#D8B4FE" },
-  ];
-  const HIGHLIGHT_OPACITIES = [0.2, 0.3, 0.4, 0.5, 0.6];
-  
-  const [recentColors, setRecentColors] = useState<string[]>([]);
-  const pushRecentColor = useCallback((color: string) => {
-    setRecentColors((prev) => [color, ...prev.filter((c) => c !== color)].slice(0, 8));
-  }, []);
-  const [highlightSettings, setHighlightSettings] = useState<{ color: string; opacity: number }>({ color: "#FDE047", opacity: 0.35 });
-  const [shapeDefaults, setShapeDefaults] = useState<{ stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" }>({ stroke: "#DC2626", strokeWidth: 2, fill: null, dash: "solid" });
-
-  const [showLeftSidebar, setShowLeftSidebar] = useState(true);
-  const [textPreviewFonts, setTextPreviewFonts] = useState<Record<string, string>>({});
-  const loadedGoogleFontsRef = useRef<Set<string>>(new Set());
-  const setPreviewFont = useCallback((id: string, family: string) => {
-    setTextPreviewFonts((m) => ({ ...m, [id]: family }));
-    if (GOOGLE_FONT_FAMILIES.includes(family) && !loadedGoogleFontsRef.current.has(family)) {
-      loadedGoogleFontsRef.current.add(family);
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, "+")}:wght@400;700&display=swap`;
-      document.head.appendChild(link);
-    }
-  }, []);
-  
-  const [showMoreTools, setShowMoreTools] = useState(false);
-  const moreBtnRef = useRef<HTMLDivElement | null>(null);
-  const shapeBtnRef = useRef<HTMLDivElement | null>(null);
-  const [moreToolsPos, setMoreToolsPos] = useState<{ top: number; left: number } | null>(null);
-  const [shapePickerPos, setShapePickerPos] = useState<{ top: number; left: number } | null>(null);
-
-  useEffect(() => {
-    if (!showMoreTools) return;
-    const onDown = (ev: MouseEvent) => { if (moreBtnRef.current && !moreBtnRef.current.contains(ev.target as Node)) setShowMoreTools(false); };
-    document.addEventListener("mousedown", onDown); return () => document.removeEventListener("mousedown", onDown);
-  }, [showMoreTools]);
-  useEffect(() => {
-    if (!showShapePicker) return;
-    const onDown = (ev: MouseEvent) => { if (shapeBtnRef.current && !shapeBtnRef.current.contains(ev.target as Node)) setShowShapePicker(false); };
-    document.addEventListener("mousedown", onDown); return () => document.removeEventListener("mousedown", onDown);
-  }, [showShapePicker]);
-
-  const [phase, setPhase] = useState<Phase>("reading");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [current, setCurrent] = useState(0);
-  const [zoom, setZoom] = useState(1);
-  const [fitMode, setFitMode] = useState<"width" | "page" | "custom">("width");
-  const [thumbs, setThumbs] = useState<Record<number, string>>({});
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{ pageIndex: number; snippet: string }[]>([]);
-  const [searchActiveIdx, setSearchActiveIdx] = useState(0);
-  const [searching, setSearching] = useState(false);
-  const textCacheRef = useRef<Record<number, string>>({});
-  const [signatureOpen, setSignatureOpen] = useState(false);
-  const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const historyRef = useRef<HistorySnapshot[]>([]);
-  const historyIndexRef = useRef<number>(-1);
-  const [, setHistoryTick] = useState(0);
-  const skipHistoryRef = useRef(false);
-  const [processing, setProcessing] = useState(false);
-  const [success, setSuccess] = useState<null | { blob: Blob; filename: string; thumb: string | null; pages: number }>(null);
-  const lastSelectedRef = useRef<number | null>(null);
-  const panStateRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; el: HTMLElement } | null>(null);
-
-  useEffect(() => { setSavedSignatures(getSavedSignatures()); }, [signatureOpen]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setPhase("reading"); setErrorMsg(null); setPdf(null); setPages([]); setElements([]);
-    setSelectedIds(new Set()); setThumbs({}); setCurrent(0); setSuccess(null);
-    historyRef.current = []; historyIndexRef.current = -1; textCacheRef.current = {};
-    (async () => {
-      try {
-        const { loadPdf } = await import("@/lib/pdf-render");
-        const doc = (await loadPdf(file)) as unknown as PdfDoc;
-        if (cancelled) return;
-        const initial: EditorPage[] = Array.from({ length: doc.numPages }, (_, i) => ({ id: `p${i}`, originalIndex: i, rotation: 0, selected: false }));
-        setPdf(doc); setPages(initial);
-        historyRef.current = [{ pages: initial, elements: [] }]; historyIndexRef.current = 0;
-        setPhase("rendering");
-      } catch (e) {
-        if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "Could not read PDF.";
-        setErrorMsg(/password/i.test(msg) ? "This PDF is password-protected." : /invalid|corrupt/i.test(msg) ? "This file appears corrupt." : msg);
-        setPhase("error");
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [file]);
-
-  useEffect(() => {
-    if (!pdf) return;
-    let cancelled = false;
-    (async () => {
-      for (let i = 0; i < pdf.numPages; i++) {
-        if (cancelled) return;
-        if (thumbs[i]) continue;
-        try {
-          const page = await pdf.getPage(i + 1);
-          const vp = page.getViewport({ scale: 0.3 });
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
-          const ctx = canvas.getContext("2d"); if (!ctx) continue;
-          await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
-          if (!cancelled) setThumbs((t) => ({ ...t, [i]: canvas.toDataURL("image/jpeg", 0.75) }));
-        } catch { /**/ }
-      }
-      if (!cancelled) setPhase("ready");
-    })();
-    return () => { cancelled = true; };
-  }, [pdf]);
-
-  useEffect(() => {
-    if (pages.length === 0) return;
-    if (skipHistoryRef.current) { skipHistoryRef.current = false; return; }
-    const idx = historyIndexRef.current;
-    const last = historyRef.current[idx];
-    const next: HistorySnapshot = { pages, elements };
-    if (last && snapshotsEqual(last, next)) return;
-    const trimmed = historyRef.current.slice(0, idx + 1);
-    trimmed.push(next);
-    while (trimmed.length > MAX_HISTORY) trimmed.shift();
-    historyRef.current = trimmed; historyIndexRef.current = trimmed.length - 1;
-    setHistoryTick((n) => n + 1);
-  }, [pages, elements]);
-
-  const canUndo = historyIndexRef.current > 0;
-  const canRedo = historyIndexRef.current < historyRef.current.length - 1;
-  const applySnapshot = useCallback((snap: HistorySnapshot) => { skipHistoryRef.current = true; setPages(snap.pages); setElements(snap.elements); }, []);
-  const undo = useCallback(() => { const idx = historyIndexRef.current; if (idx <= 0) return; historyIndexRef.current = idx - 1; applySnapshot(historyRef.current[idx - 1]); setSelectedIds(new Set()); setHistoryTick((n) => n + 1); }, [applySnapshot]);
-  const redo = useCallback(() => { const idx = historyIndexRef.current; if (idx >= historyRef.current.length - 1) return; historyIndexRef.current = idx + 1; applySnapshot(historyRef.current[idx + 1]); setSelectedIds(new Set()); setHistoryTick((n) => n + 1); }, [applySnapshot]);
-
-  const selectAllPages = useCallback(() => setPages((ps) => ps.map((p) => ({ ...p, selected: true }))), []);
-  const handlePageClick = useCallback((i: number, e: ReactMouseEvent) => {
-    setCurrent(i); document.getElementById(`pdf-page-${i}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    lastSelectedRef.current = i;
-  }, []);
-  const rotatePage = useCallback((i: number, delta: number) => setPages((ps) => ps.map((p, idx) => (idx === i ? { ...p, rotation: (p.rotation + delta + 360) % 360 } : p))), []);
-  const deletePage = useCallback((i: number) => setPages((ps) => { if (ps.length <= 1) { toast.error("PDF must have at least one page."); return ps; } return ps.filter((_, idx) => idx !== i); }), []);
-  const duplicatePage = useCallback((i: number) => setPages((ps) => { const out = [...ps]; out.splice(i + 1, 0, { ...ps[i], id: `${ps[i].id}-dup-${Date.now()}`, selected: false }); return out; }), []);
-  const insertBlankPage = useCallback((after: number) => setPages((ps) => { const out = [...ps]; out.splice(after + 1, 0, { id: `blank-${Date.now()}`, originalIndex: -1, isBlank: true, rotation: 0, selected: false }); return out; }), []);
-
-  const addElementKeepTool = useCallback((el: AnyElement) => {
-    setElements((es) => [...es, el]);
-    setSelectedIds(new Set([el.id]));
-  }, []);
-  
-  const finishOneShotTool = useCallback(() => {
-    setActiveTool("select");
-  }, []);
-  
-  const addElement = useCallback((el: AnyElement) => {
-    addElementKeepTool(el);
-    finishOneShotTool();
-  }, [addElementKeepTool, finishOneShotTool]);
-
-  const updateElement = useCallback((id: string, patch: Partial<AnyElement>) => setElements((es) => es.map((e) => (e.id === id ? ({ ...e, ...patch } as AnyElement) : e))), []);
-  const updateElements = useCallback((ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => setElements((es) => es.map((e) => (ids.has(e.id) ? ({ ...e, ...patchFn(e) } as AnyElement) : e))), []);
-  const deleteElements = useCallback((ids: Set<string>) => { setElements((es) => es.filter((e) => !ids.has(e.id))); setSelectedIds(new Set()); }, []);
-  const duplicateElements = useCallback((ids: Set<string>) => {
-    setElements((es) => { const toDup = es.filter((e) => ids.has(e.id)); const clones = toDup.map((e) => ({ ...e, id: makeId("dup"), x: e.x + 14, y: e.y + 14 } as AnyElement)); setSelectedIds(new Set(clones.map((c) => c.id))); return [...es, ...clones]; });
-  }, []);
-  const replaceElements = useCallback((toRemove: string[], toAdd: AnyElement[]) => setElements((es) => [...es.filter((e) => !toRemove.includes(e.id)), ...toAdd]), []);
-  const reorderZ = useCallback((ids: Set<string>, dir: "forward" | "backward" | "front" | "back") => {
-    setElements((es) => {
-      const next = [...es];
-      const indices = next.map((e, i) => (ids.has(e.id) ? i : -1)).filter((i) => i >= 0);
-      if (!indices.length) return es;
-      if (dir === "front") { const items = indices.map((i) => next[i]); return [...next.filter((_, i) => !indices.includes(i)), ...items]; }
-      if (dir === "back") { const items = indices.map((i) => next[i]); return [...items, ...next.filter((_, i) => !indices.includes(i))]; }
-      const step = dir === "forward" ? 1 : -1;
-      const order = dir === "forward" ? [...indices].reverse() : indices;
-      for (const i of order) { const j = i + step; if (j < 0 || j >= next.length || ids.has(next[j].id)) continue; [next[i], next[j]] = [next[j], next[i]]; }
-      return next;
-    });
-  }, []);
-
-  const selectedElements = useMemo(() => elements.filter((e) => selectedIds.has(e.id)), [elements, selectedIds]);
-  const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null;
-
-  useEffect(() => {
-    function onKey(ev: KeyboardEvent) {
-      const t = ev.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      const mod = ev.metaKey || ev.ctrlKey;
-      if (mod && ev.key.toLowerCase() === "z" && !ev.shiftKey) { ev.preventDefault(); undo(); }
-      else if ((mod && ev.key.toLowerCase() === "y") || (mod && ev.shiftKey && ev.key.toLowerCase() === "z")) { ev.preventDefault(); redo(); }
-      else if (mod && ev.key.toLowerCase() === "d") { ev.preventDefault(); if (selectedIds.size > 0) duplicateElements(selectedIds); }
-      else if (mod && ev.key.toLowerCase() === "a") {
-        ev.preventDefault();
-        if (elements.length > 0 && activeTool === "select") { const pid = pages[current]?.id; setSelectedIds(new Set(elements.filter((e) => e.pageId === pid).map((e) => e.id))); }
-        else selectAllPages();
-      } else if (mod && ev.key.toLowerCase() === "f") { ev.preventDefault(); setShowSearch(true); }
-      else if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); if (selectedIds.size > 0) deleteElements(selectedIds); }
-      else if (ev.key === "Escape") { setSelectedIds(new Set()); setActiveTool("select"); setShowSearch(false); }
-      else if (["ArrowDown","ArrowRight","ArrowUp","ArrowLeft"].includes(ev.key) && selectedIds.size > 0) {
-        ev.preventDefault();
-        const amt = ev.shiftKey ? NUDGE_FAST : NUDGE;
-        const dx = ev.key === "ArrowRight" ? amt : ev.key === "ArrowLeft" ? -amt : 0;
-        const dy = ev.key === "ArrowDown" ? amt : ev.key === "ArrowUp" ? -amt : 0;
-        updateElements(selectedIds, (e) => ({ x: e.x + dx, y: e.y + dy }));
-      }
-    }
-    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, selectAllPages, deleteElements, duplicateElements, updateElements, pages, current, selectedIds, elements, activeTool]);
-
-  async function runSearch(query: string) {
-    setSearchQuery(query); setSearchActiveIdx(0);
-    if (!pdf || !query.trim()) { setSearchResults([]); return; }
-    setSearching(true);
-    try {
-      const results: { pageIndex: number; snippet: string }[] = [];
-      for (let i = 0; i < pages.length; i++) {
-        const oi = pages[i].originalIndex; if (oi < 0) continue;
-        let text = textCacheRef.current[oi];
-        if (text == null) { try { const p = await pdf.getPage(oi + 1); const c = await p.getTextContent?.(); text = c ? c.items.map((it) => it.str).join(" ") : ""; } catch { text = ""; } textCacheRef.current[oi] = text; }
-        const idx = text.toLowerCase().indexOf(query.toLowerCase());
-        if (idx >= 0) { const s = Math.max(0, idx - 30); results.push({ pageIndex: i, snippet: `${s > 0 ? "…" : ""}${text.slice(s, idx + query.length + 30)}…` }); }
-      }
-      setSearchResults(results);
-    } finally { setSearching(false); }
-  }
-  function jumpToResult(idx: number) {
-    if (!searchResults.length) return;
-    const c = ((idx % searchResults.length) + searchResults.length) % searchResults.length;
-    setSearchActiveIdx(c); const pi = searchResults[c].pageIndex; setCurrent(pi);
-    document.getElementById(`pdf-page-${pi}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
-  function onImageChosen(fl: FileList | null) {
-    const f = fl?.[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result); const img = new Image();
-      img.onload = () => { const pid = pages[current]?.id; if (!pid) return; const s = Math.min(1, 220 / img.width); addElementKeepTool({ id: makeId("img"), pageId: pid, type: "image", x: 60, y: 60, width: img.width * s, height: img.height * s, opacity: 1, rotation: 0, src } as ImageElement); };
-      img.src = src;
+  render: (options: {
+    canvas: HTMLCanvasElement;
+    canvasContext: CanvasRenderingContext2D;
+    viewport: {
+      width: number;
+      height: number;
     };
-    reader.readAsDataURL(f);
-  }
+  }) => {
+    promise: Promise<void>;
+  };
 
-  function placeSignature(src: string) {
-    const pid = pages[current]?.id; if (!pid) return;
-    addElement({ id: makeId("sig"), pageId: pid, type: "image", x: 80, y: 80, width: 180, height: 70, opacity: 1, rotation: 0, src } as ImageElement);
-  }
-  function handleSignatureInsert(src: string, save: boolean) { if (save) saveSignature(src); placeSignature(src); setSignatureOpen(false); }
+  getTextContent?: () => Promise<{
+    items: {
+      str: string;
+    }[];
+  }>;
+};
 
-  async function apply() {
-    if (processing || busy) return; setProcessing(true);
-    try {
-      const result = await onApply({ pages, selectedIds: new Set(pages.filter((p) => p.selected).map((p) => p.id)) });
-      if (result && "blob" in result) {
-        let finalBlob = result.blob;
-        try { finalBlob = await stampElements(result.blob, pages, elements); } catch (e) { console.error("Stamp failed", e); toast.error("Saved, but annotations could not be embedded."); }
-        let thumbUrl: string | null = null; let pageCount = pages.length;
-        try {
-          const { loadPdf, renderPdfPageToCanvas, canvasToBlob } = await import("@/lib/pdf-render");
-          const doc = await loadPdf(new File([finalBlob], result.filename, { type: "application/pdf" })); pageCount = doc.numPages;
-          const canvas = await renderPdfPageToCanvas(doc, 1, 1.2); const b = await canvasToBlob(canvas, "image/png"); thumbUrl = URL.createObjectURL(b);
-        } catch { /**/ }
-        setSuccess({ blob: finalBlob, filename: result.filename, thumb: thumbUrl, pages: pageCount });
-        const url = URL.createObjectURL(finalBlob);
-        publishResult({ name: result.filename, mime: "application/pdf", size: finalBlob.size, url, createdAt: Date.now() });
+type PdfDoc = {
+  numPages: number;
+  getPage: (
+    index: number,
+  ) => Promise<PdfPage>;
+};
+
+type Props = {
+  file: File;
+  mode: string;
+  actionLabel: string;
+  busy?: boolean;
+  selectionHint?: string;
+  onReplace: () => void;
+  onApply: (
+    state: EditorApplyState,
+  ) =>
+    | Promise<EditorApplyResult>
+    | EditorApplyResult;
+};
+
+type SearchResult = {
+  pageIndex: number;
+  snippet: string;
+};
+
+type SaveStatus =
+  | "saved"
+  | "unsaved"
+  | "saving";
+
+type SuccessState = {
+  blob: Blob;
+  filename: string;
+  thumb: string | null;
+  pages: number;
+};
+
+const NUDGE = 1;
+const NUDGE_FAST = 10;
+
+function initialPages(
+  count: number,
+): EditorPage[] {
+  return Array.from(
+    {
+      length: count,
+    },
+    (_, index) => ({
+      id: `p${index}`,
+      originalIndex: index,
+      rotation: 0,
+      selected: false,
+    }),
+  );
+}
+
+export function PdfEditor(
+  props: Props,
+) {
+  const fileKey = useMemo(
+    () =>
+      makeEditorFileKey(
+        props.file,
+      ),
+    [props.file],
+  );
+
+  return (
+    <EditorErrorBoundary
+      fileKey={fileKey}
+      onReplace={props.onReplace}
+    >
+      <PdfEditorInner
+        {...props}
+        fileKey={fileKey}
+      />
+    </EditorErrorBoundary>
+  );
+}
+
+function PdfEditorInner({
+  file,
+  actionLabel,
+  busy = false,
+  onReplace,
+  onApply,
+  fileKey,
+}: Props & {
+  fileKey: string;
+}) {
+  const [
+    pdf,
+    setPdf,
+  ] =
+    useState<PdfDoc | null>(
+      null,
+    );
+
+  const history =
+    useEditorHistory({
+      pages: [],
+      elements: [],
+    });
+
+  const {
+    reset: resetHistory,
+    commit: commitHistory,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = history;
+
+  const pages =
+    history.pages;
+
+  const elements =
+    history.elements;
+
+  const [
+    selectedIds,
+    setSelectedIds,
+  ] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const [
+    editingTextId,
+    setEditingTextId,
+  ] = useState<
+    string | null
+  >(null);
+
+  const editingOriginalTextRef =
+    useRef<
+      Record<string, string>
+    >({});
+
+  const [
+    activeTool,
+    setActiveTool,
+  ] = useState<Tool>(
+    "select",
+  );
+
+  const [
+    activeShape,
+    setActiveShape,
+  ] = useState<Tool>(
+    "shape-rect",
+  );
+
+  const [
+    phase,
+    setPhase,
+  ] = useState<Phase>(
+    "reading",
+  );
+
+  const [
+    errorMsg,
+    setErrorMsg,
+  ] = useState<string | null>(
+    null,
+  );
+
+  const [
+    current,
+    setCurrent,
+  ] = useState(0);
+
+  /*
+   * Initial editor preview:
+   * 60% instead of the previous 100% / width-fit mode.
+   */
+  const [
+    zoom,
+    setZoom,
+  ] = useState(0.6);
+
+  const [
+    fitMode,
+    setFitMode,
+  ] = useState<
+    "width" | "page" | "custom"
+  >("custom");
+
+  const [
+    thumbs,
+    setThumbs,
+  ] = useState<
+    Record<number, string>
+  >({});
+
+  const [
+    showPagePanel,
+    setShowPagePanel,
+  ] = useState(false);
+
+  const [
+    showSearch,
+    setShowSearch,
+  ] = useState(false);
+
+  const [
+    searchQuery,
+    setSearchQuery,
+  ] = useState("");
+
+  const [
+    searchResults,
+    setSearchResults,
+  ] = useState<
+    SearchResult[]
+  >([]);
+
+  const [
+    searchActiveIdx,
+    setSearchActiveIdx,
+  ] = useState(0);
+
+  const [
+    searching,
+    setSearching,
+  ] = useState(false);
+
+  const [
+    signatureOpen,
+    setSignatureOpen,
+  ] = useState(false);
+
+  const [
+    savedSignatures,
+    setSavedSignatures,
+  ] = useState<
+    SavedSignature[]
+  >([]);
+
+  const [
+    processing,
+    setProcessing,
+  ] = useState(false);
+
+  const [
+    saveStatus,
+    setSaveStatus,
+  ] = useState<SaveStatus>(
+    "saved",
+  );
+
+  const [
+    success,
+    setSuccess,
+  ] =
+    useState<SuccessState | null>(
+      null,
+    );
+
+  const [
+    selectionRect,
+    setSelectionRect,
+  ] = useState<
+    DOMRect | null
+  >(null);
+
+  const [
+    imagePickerState,
+    setImagePickerState,
+  ] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
+
+  const [
+    imagePickerError,
+    setImagePickerError,
+  ] =
+    useState<string | null>(
+      null,
+    );
+
+  const clipboardRef =
+    useRef<
+      AnyElement[] | null
+    >(null);
+
+  const textCacheRef =
+    useRef<
+      Record<number, string>
+    >({});
+
+  const panStateRef =
+    useRef<{
+      startX: number;
+      startY: number;
+      scrollLeft: number;
+      scrollTop: number;
+      el: HTMLElement;
+    } | null>(null);
+
+  const [
+    drawStroke,
+    setDrawStroke,
+  ] = useState({
+    color: "#DC2626",
+    width: 2,
+  });
+
+  const [
+    eraserSize,
+    setEraserSize,
+  ] = useState(15);
+
+  const [
+    highlightSettings,
+    setHighlightSettings,
+  ] = useState({
+    color: "#FDE047",
+    opacity: 0.35,
+  });
+
+  const [
+    shapeDefaults,
+    setShapeDefaults,
+  ] =
+    useState<ShapeDefaults>(
+      {
+        stroke: "#DC2626",
+        strokeWidth: 2,
+        fill: null,
+        dash: "solid",
+      },
+    );
+
+  const selectedElements =
+    useMemo(
+      () =>
+        elements.filter(
+          (element) =>
+            selectedIds.has(
+              element.id,
+            ),
+        ),
+      [
+        elements,
+        selectedIds,
+      ],
+    );
+
+  const singleSelected =
+    selectedElements.length ===
+    1
+      ? selectedElements[0]
+      : null;
+
+  const annotateDisabled =
+    !pages[current];
+
+  const commit =
+    useCallback(
+      (
+        nextPages: EditorPage[] =
+          pages,
+        nextElements: AnyElement[] =
+          elements,
+      ) => {
+        commitHistory({
+          pages: nextPages,
+          elements:
+            nextElements,
+        });
+
+        setSaveStatus(
+          "unsaved",
+        );
+      },
+      [
+        commitHistory,
+        elements,
+        pages,
+      ],
+    );
+
+  const updateElements =
+    useCallback(
+      (
+        ids: Set<string>,
+        patchFn: (
+          element: AnyElement,
+        ) => Partial<AnyElement>,
+      ) => {
+        const next =
+          elements.map(
+            (element) =>
+              ids.has(
+                element.id,
+              )
+                ? ({
+                    ...element,
+                    ...patchFn(
+                      element,
+                    ),
+                  } as AnyElement)
+                : element,
+          );
+
+        commit(
+          pages,
+          next,
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const updateElement =
+    useCallback(
+      (
+        id: string,
+        patch: Partial<AnyElement>,
+      ) =>
+        updateElements(
+          new Set([id]),
+          () => patch,
+        ),
+      [updateElements],
+    );
+
+  const deleteElements =
+    useCallback(
+      (ids: Set<string>) => {
+        commit(
+          pages,
+          elements.filter(
+            (element) =>
+              !ids.has(
+                element.id,
+              ),
+          ),
+        );
+
+        setSelectedIds(
+          new Set(),
+        );
+
+        setEditingTextId(
+          (id) =>
+            id &&
+            ids.has(id)
+              ? null
+              : id,
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const duplicateElements =
+    useCallback(
+      (ids: Set<string>) => {
+        const clones =
+          elements
+            .filter(
+              (element) =>
+                ids.has(
+                  element.id,
+                ),
+            )
+            .map(
+              (element) =>
+                ({
+                  ...element,
+                  id: makeId(
+                    "dup",
+                  ),
+                  x:
+                    element.x +
+                    14,
+                  y:
+                    element.y +
+                    14,
+                } as AnyElement),
+            );
+
+        if (
+          !clones.length
+        ) {
+          return;
+        }
+
+        commit(
+          pages,
+          [
+            ...elements,
+            ...clones,
+          ],
+        );
+
+        setSelectedIds(
+          new Set(
+            clones.map(
+              (clone) =>
+                clone.id,
+            ),
+          ),
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const replaceElements =
+    useCallback(
+      (
+        toRemove: string[],
+        toAdd: AnyElement[],
+      ) => {
+        commit(
+          pages,
+          [
+            ...elements.filter(
+              (element) =>
+                !toRemove.includes(
+                  element.id,
+                ),
+            ),
+            ...toAdd,
+          ],
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const addElementKeepTool =
+    useCallback(
+      (element: AnyElement) => {
+        commit(
+          pages,
+          [
+            ...elements,
+            element,
+          ],
+        );
+
+        setSelectedIds(
+          new Set([
+            element.id,
+          ]),
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const addElement =
+    useCallback(
+      (element: AnyElement) => {
+        addElementKeepTool(
+          element,
+        );
+
+        setActiveTool(
+          "select",
+        );
+      },
+      [addElementKeepTool],
+    );
+
+  const addTextAt =
+    useCallback(
+      (
+        pageId: string,
+        x: number,
+        y: number,
+        width = 200,
+        height = 32,
+      ) => {
+        const id =
+          makeId("txt");
+
+        const element: TextElement =
+          {
+            id,
+            pageId,
+            type: "text",
+            x,
+            y,
+            width,
+            height,
+            opacity: 1,
+            rotation: 0,
+            text: "",
+            font: "Helvetica",
+            fontSize: 14,
+            bold: false,
+            italic: false,
+            underline:
+              false,
+            color: "#111827",
+            align: "left",
+            letterSpacing: 0,
+            lineSpacing: 1.25,
+          };
+
+        commit(
+          pages,
+          [
+            ...elements,
+            element,
+          ],
+        );
+
+        editingOriginalTextRef.current[
+          id
+        ] = "";
+
+        setSelectedIds(
+          new Set([id]),
+        );
+
+        setEditingTextId(
+          id,
+        );
+
+        setActiveTool(
+          "select",
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const beginTextEdit =
+    useCallback(
+      (id: string) => {
+        const element =
+          elements.find(
+            (candidate) =>
+              candidate.id ===
+              id,
+          );
+
+        if (
+          element?.type ===
+          "text"
+        ) {
+          editingOriginalTextRef.current[
+            id
+          ] =
+            element.text;
+        }
+
+        setSelectedIds(
+          new Set([id]),
+        );
+
+        setEditingTextId(
+          id,
+        );
+      },
+      [elements],
+    );
+
+  const finishTextEdit =
+    useCallback(
+      (
+        id: string,
+        value: string,
+        cancel = false,
+      ) => {
+        const text =
+          value.replace(
+            /\u00a0/g,
+            " ",
+          );
+
+        const original =
+          editingOriginalTextRef
+            .current[id] ??
+          "";
+
+        setEditingTextId(
+          (currentId) =>
+            currentId === id
+              ? null
+              : currentId,
+        );
+
+        delete editingOriginalTextRef
+          .current[id];
+
+        if (
+          cancel ||
+          !text.trim()
+        ) {
+          if (
+            !original.trim()
+          ) {
+            commit(
+              pages,
+              elements.filter(
+                (element) =>
+                  element.id !==
+                  id,
+              ),
+            );
+
+            setSelectedIds(
+              new Set(),
+            );
+          }
+
+          return;
+        }
+
+        commit(
+          pages,
+          elements.map(
+            (element) =>
+              element.id ===
+                id &&
+              element.type ===
+                "text"
+                ? {
+                    ...element,
+                    text,
+                  }
+                : element,
+          ),
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const copyElements =
+    useCallback(
+      (ids: Set<string>) => {
+        clipboardRef.current =
+          elements.filter(
+            (element) =>
+              ids.has(
+                element.id,
+              ),
+          );
+      },
+      [elements],
+    );
+
+  const pasteElements =
+    useCallback(
+      (pageId: string) => {
+        const clip =
+          clipboardRef.current;
+
+        if (
+          !clip?.length
+        ) {
+          return;
+        }
+
+        const clones =
+          clip.map(
+            (element) =>
+              ({
+                ...element,
+                id: makeId(
+                  "paste",
+                ),
+                pageId,
+                x:
+                  element.x +
+                  20,
+                y:
+                  element.y +
+                  20,
+              } as AnyElement),
+          );
+
+        commit(
+          pages,
+          [
+            ...elements,
+            ...clones,
+          ],
+        );
+
+        setSelectedIds(
+          new Set(
+            clones.map(
+              (clone) =>
+                clone.id,
+            ),
+          ),
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const reorderZ =
+    useCallback(
+      (
+        ids: Set<string>,
+        dir:
+          | "forward"
+          | "backward"
+          | "front"
+          | "back",
+      ) => {
+        const next =
+          [...elements];
+
+        const indices =
+          next
+            .map(
+              (
+                element,
+                index,
+              ) =>
+                ids.has(
+                  element.id,
+                )
+                  ? index
+                  : -1,
+            )
+            .filter(
+              (index) =>
+                index >= 0,
+            );
+
+        if (
+          !indices.length
+        ) {
+          return;
+        }
+
+        if (
+          dir === "front"
+        ) {
+          const items =
+            indices.map(
+              (index) =>
+                next[index],
+            );
+
+          commit(
+            pages,
+            [
+              ...next.filter(
+                (_, index) =>
+                  !indices.includes(
+                    index,
+                  ),
+              ),
+              ...items,
+            ],
+          );
+
+          return;
+        }
+
+        if (
+          dir === "back"
+        ) {
+          const items =
+            indices.map(
+              (index) =>
+                next[index],
+            );
+
+          commit(
+            pages,
+            [
+              ...items,
+              ...next.filter(
+                (_, index) =>
+                  !indices.includes(
+                    index,
+                  ),
+              ),
+            ],
+          );
+
+          return;
+        }
+
+        const step =
+          dir ===
+          "forward"
+            ? 1
+            : -1;
+
+        const order =
+          dir ===
+          "forward"
+            ? [...indices].reverse()
+            : indices;
+
+        for (
+          const index of order
+        ) {
+          const target =
+            index + step;
+
+          if (
+            target < 0 ||
+            target >=
+              next.length ||
+            ids.has(
+              next[target]
+                .id,
+            )
+          ) {
+            continue;
+          }
+
+          [
+            next[index],
+            next[target],
+          ] = [
+            next[target],
+            next[index],
+          ];
+        }
+
+        commit(
+          pages,
+          next,
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const alignElements =
+    useCallback(
+      (
+        ids: Set<string>,
+        mode:
+          | "left"
+          | "center"
+          | "right"
+          | "top"
+          | "middle"
+          | "bottom",
+      ) => {
+        const selected =
+          elements.filter(
+            (element) =>
+              ids.has(
+                element.id,
+              ),
+          );
+
+        if (
+          selected.length <
+          2
+        ) {
+          return;
+        }
+
+        const left =
+          Math.min(
+            ...selected.map(
+              (element) =>
+                element.x,
+            ),
+          );
+
+        const right =
+          Math.max(
+            ...selected.map(
+              (element) =>
+                element.x +
+                element.width,
+            ),
+          );
+
+        const top =
+          Math.min(
+            ...selected.map(
+              (element) =>
+                element.y,
+            ),
+          );
+
+        const bottom =
+          Math.max(
+            ...selected.map(
+              (element) =>
+                element.y +
+                element.height,
+            ),
+          );
+
+        const centerX =
+          (left + right) /
+          2;
+
+        const centerY =
+          (top + bottom) /
+          2;
+
+        commit(
+          pages,
+          elements.map(
+            (element) => {
+              if (
+                !ids.has(
+                  element.id,
+                )
+              ) {
+                return element;
+              }
+
+              const x =
+                mode ===
+                "left"
+                  ? left
+                  : mode ===
+                      "center"
+                    ? centerX -
+                      element.width /
+                        2
+                    : mode ===
+                        "right"
+                      ? right -
+                        element.width
+                      : element.x;
+
+              const y =
+                mode ===
+                "top"
+                  ? top
+                  : mode ===
+                      "middle"
+                    ? centerY -
+                      element.height /
+                        2
+                    : mode ===
+                        "bottom"
+                      ? bottom -
+                        element.height
+                      : element.y;
+
+              return {
+                ...element,
+                x,
+                y,
+              } as AnyElement;
+            },
+          ),
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const distributeElements =
+    useCallback(
+      (
+        ids: Set<string>,
+        axis:
+          | "horizontal"
+          | "vertical",
+      ) => {
+        const selected =
+          [
+            ...elements.filter(
+              (element) =>
+                ids.has(
+                  element.id,
+                ),
+            ),
+          ].sort(
+            (a, b) =>
+              axis ===
+              "horizontal"
+                ? a.x - b.x
+                : a.y - b.y,
+          );
+
+        if (
+          selected.length <
+          3
+        ) {
+          return;
+        }
+
+        const first =
+          selected[0];
+
+        const last =
+          selected[
+            selected.length -
+              1
+          ];
+
+        const totalSpan =
+          axis ===
+          "horizontal"
+            ? last.x +
+              last.width -
+              first.x
+            : last.y +
+              last.height -
+              first.y;
+
+        const totalSize =
+          selected.reduce(
+            (
+              sum,
+              element,
+            ) =>
+              sum +
+              (axis ===
+              "horizontal"
+                ? element.width
+                : element.height),
+            0,
+          );
+
+        const gap =
+          (totalSpan -
+            totalSize) /
+          (selected.length -
+            1);
+
+        let cursor =
+          axis ===
+          "horizontal"
+            ? first.x
+            : first.y;
+
+        const positions =
+          new Map<
+            string,
+            number
+          >();
+
+        for (
+          const element of selected
+        ) {
+          positions.set(
+            element.id,
+            cursor,
+          );
+
+          cursor +=
+            (axis ===
+            "horizontal"
+              ? element.width
+              : element.height) +
+            gap;
+        }
+
+        commit(
+          pages,
+          elements.map(
+            (element) => {
+              const position =
+                positions.get(
+                  element.id,
+                );
+
+              if (
+                position ==
+                null
+              ) {
+                return element;
+              }
+
+              return axis ===
+                "horizontal"
+                ? ({
+                    ...element,
+                    x: position,
+                  } as AnyElement)
+                : ({
+                    ...element,
+                    y: position,
+                  } as AnyElement);
+            },
+          ),
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const selectAllPages =
+    useCallback(
+      () =>
+        commit(
+          pages.map(
+            (page) => ({
+              ...page,
+              selected:
+                true,
+            }),
+          ),
+          elements,
+        ),
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const handlePageClick =
+    useCallback(
+      (index: number) => {
+        setCurrent(index);
+
+        document
+          .getElementById(
+            `pdf-page-${index}`,
+          )
+          ?.scrollIntoView({
+            behavior:
+              "smooth",
+            block:
+              "center",
+          });
+      },
+      [],
+    );
+
+  const rotatePage =
+    useCallback(
+      (
+        index: number,
+        delta: number,
+      ) =>
+        commit(
+          pages.map(
+            (
+              page,
+              pageIndex,
+            ) =>
+              pageIndex ===
+              index
+                ? {
+                    ...page,
+                    rotation:
+                      (page.rotation +
+                        delta +
+                        360) %
+                      360,
+                  }
+                : page,
+          ),
+          elements,
+        ),
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const deletePage =
+    useCallback(
+      (index: number) => {
+        if (
+          pages.length <=
+          1
+        ) {
+          toast.error(
+            "PDF must have at least one page.",
+          );
+
+          return;
+        }
+
+        const deletedPageId =
+          pages[index]?.id;
+
+        commit(
+          pages.filter(
+            (
+              _,
+              pageIndex,
+            ) =>
+              pageIndex !==
+              index,
+          ),
+          deletedPageId
+            ? elements.filter(
+                (element) =>
+                  element.pageId !==
+                  deletedPageId,
+              )
+            : elements,
+        );
+
+        setCurrent(
+          (value) =>
+            Math.min(
+              value,
+              pages.length -
+                2,
+            ),
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const duplicatePage =
+    useCallback(
+      (index: number) => {
+        const source =
+          pages[index];
+
+        if (!source) {
+          return;
+        }
+
+        const copy = {
+          ...source,
+          id: `${source.id}-dup-${Date.now()}`,
+          selected:
+            false,
+        };
+
+        commit(
+          [
+            ...pages.slice(
+              0,
+              index + 1,
+            ),
+            copy,
+            ...pages.slice(
+              index + 1,
+            ),
+          ],
+          [
+            ...elements,
+            ...elements
+              .filter(
+                (element) =>
+                  element.pageId ===
+                  source.id,
+              )
+              .map(
+                (element) =>
+                  ({
+                    ...element,
+                    id: makeId(
+                      "page-copy",
+                    ),
+                    pageId:
+                      copy.id,
+                  } as AnyElement),
+              ),
+          ],
+        );
+
+        setCurrent(
+          index + 1,
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const insertBlankPage =
+    useCallback(
+      (after: number) => {
+        const blank: EditorPage =
+          {
+            id: `blank-${Date.now()}`,
+            originalIndex:
+              -1,
+            isBlank: true,
+            rotation: 0,
+            selected:
+              false,
+          };
+
+        commit(
+          [
+            ...pages.slice(
+              0,
+              after + 1,
+            ),
+            blank,
+            ...pages.slice(
+              after + 1,
+            ),
+          ],
+          elements,
+        );
+
+        setCurrent(
+          after + 1,
+        );
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  const movePage =
+    useCallback(
+      (
+        from: number,
+        to: number,
+      ) => {
+        if (
+          from === to ||
+          from < 0 ||
+          to < 0 ||
+          from >=
+            pages.length ||
+          to >= pages.length
+        ) {
+          return;
+        }
+
+        const next =
+          [...pages];
+
+        const [
+          moved,
+        ] = next.splice(
+          from,
+          1,
+        );
+
+        next.splice(
+          to,
+          0,
+          moved,
+        );
+
+        commit(
+          next,
+          elements,
+        );
+
+        setCurrent(to);
+      },
+      [
+        commit,
+        elements,
+        pages,
+      ],
+    );
+
+  useEffect(() => {
+    setSavedSignatures(
+      getSavedSignatures(),
+    );
+  }, [signatureOpen]);
+
+  useEffect(() => {
+    function onBeforeUnload(
+      event: BeforeUnloadEvent,
+    ) {
+      if (
+        saveStatus !==
+        "unsaved"
+      ) {
+        return;
       }
-    } finally { setProcessing(false); }
-  }
 
-  if (phase === "error") {
+      event.preventDefault();
+      event.returnValue =
+        "";
+    }
+
+    window.addEventListener(
+      "beforeunload",
+      onBeforeUnload,
+    );
+
+    return () =>
+      window.removeEventListener(
+        "beforeunload",
+        onBeforeUnload,
+      );
+  }, [saveStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setPhase("reading");
+    setErrorMsg(null);
+    setPdf(null);
+    setSelectedIds(
+      new Set(),
+    );
+    setThumbs({});
+    setCurrent(0);
+    setSuccess(null);
+
+    textCacheRef.current =
+      {};
+
+    resetHistory({
+      pages: [],
+      elements: [],
+    });
+
+    void (async () => {
+      try {
+        const {
+          loadPdf,
+        } = await import(
+          "@/lib/pdf-render"
+        );
+
+        const doc =
+          (await loadPdf(
+            file,
+          )) as unknown as PdfDoc;
+
+        if (
+          cancelled
+        ) {
+          return;
+        }
+
+        const draft =
+          loadEditorDraft(
+            fileKey,
+          );
+
+        const canRestore =
+          !!draft &&
+          draft.pages
+            .length > 0 &&
+          draft.pages.every(
+            (page) =>
+              page.isBlank ||
+              (page.originalIndex >=
+                0 &&
+                page.originalIndex <
+                  doc.numPages),
+          );
+
+        const restoredPages =
+          canRestore &&
+          draft
+            ? draft.pages
+            : initialPages(
+                doc.numPages,
+              );
+
+        const allowedPageIds =
+          new Set(
+            restoredPages.map(
+              (page) =>
+                page.id,
+            ),
+          );
+
+        const restoredElements =
+          canRestore &&
+          draft
+            ? draft.elements.filter(
+                (element) =>
+                  allowedPageIds.has(
+                    element.pageId,
+                  ),
+              )
+            : [];
+
+        setPdf(doc);
+
+        resetHistory({
+          pages:
+            restoredPages,
+          elements:
+            restoredElements,
+        });
+
+        setSaveStatus(
+          canRestore
+            ? "unsaved"
+            : "saved",
+        );
+
+        if (
+          canRestore
+        ) {
+          toast.success(
+            "Restored your local draft.",
+          );
+        }
+
+        setPhase(
+          "rendering",
+        );
+      } catch (error) {
+        if (
+          cancelled
+        ) {
+          return;
+        }
+
+        const message =
+          error instanceof
+          Error
+            ? error.message
+            : "Could not read PDF.";
+
+        setErrorMsg(
+          /password/i.test(
+            message,
+          )
+            ? "This PDF is password-protected."
+            : /invalid|corrupt/i.test(
+                  message,
+                )
+              ? "This file appears corrupt."
+              : message,
+        );
+
+        setPhase(
+          "error",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    file,
+    fileKey,
+    resetHistory,
+  ]);
+
+  useEffect(() => {
+    if (!pdf) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      for (
+        let index = 0;
+        index <
+        pdf.numPages;
+        index += 1
+      ) {
+        if (
+          cancelled
+        ) {
+          return;
+        }
+
+        if (
+          thumbs[index]
+        ) {
+          continue;
+        }
+
+        try {
+          const page =
+            await pdf.getPage(
+              index + 1,
+            );
+
+          const viewport =
+            page.getViewport({
+              scale: 0.3,
+            });
+
+          const canvas =
+            document.createElement(
+              "canvas",
+            );
+
+          canvas.width =
+            Math.ceil(
+              viewport.width,
+            );
+
+          canvas.height =
+            Math.ceil(
+              viewport.height,
+            );
+
+          const context =
+            canvas.getContext(
+              "2d",
+            );
+
+          if (!context) {
+            continue;
+          }
+
+          await page
+            .render({
+              canvas,
+              canvasContext:
+                context,
+              viewport,
+            })
+            .promise;
+
+          if (
+            !cancelled
+          ) {
+            setThumbs(
+              (
+                currentThumbs,
+              ) => ({
+                ...currentThumbs,
+                [index]:
+                  canvas.toDataURL(
+                    "image/jpeg",
+                    0.75,
+                  ),
+              }),
+            );
+          }
+        } catch {
+          /* one thumbnail failure must not stop the editor */
+        }
+      }
+
+      if (
+        !cancelled
+      ) {
+        setPhase(
+          "ready",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf, thumbs]);
+
+  useEditorDraftAutosave(
+    fileKey,
+    pages,
+    elements,
+    phase === "ready" &&
+      !processing &&
+      !success,
+  );
+
+  useEffect(() => {
+    function onKey(
+      event: KeyboardEvent,
+    ) {
+      const target =
+        event.target as HTMLElement | null;
+
+      if (
+        target?.tagName ===
+          "INPUT" ||
+        target?.tagName ===
+          "TEXTAREA" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      const modifier =
+        event.metaKey ||
+        event.ctrlKey;
+
+      if (
+        modifier &&
+        event.key.toLowerCase() ===
+          "z" &&
+        !event.shiftKey
+      ) {
+        event.preventDefault();
+        undo();
+        return;
+      }
+
+      if (
+        (modifier &&
+          event.key.toLowerCase() ===
+            "y") ||
+        (modifier &&
+          event.shiftKey &&
+          event.key.toLowerCase() ===
+            "z")
+      ) {
+        event.preventDefault();
+        redo();
+        return;
+      }
+
+      if (
+        modifier &&
+        event.key.toLowerCase() ===
+          "d" &&
+        selectedIds.size
+      ) {
+        event.preventDefault();
+        duplicateElements(
+          selectedIds,
+        );
+        return;
+      }
+
+      if (
+        modifier &&
+        event.key.toLowerCase() ===
+          "c" &&
+        selectedIds.size
+      ) {
+        event.preventDefault();
+        copyElements(
+          selectedIds,
+        );
+        return;
+      }
+
+      if (
+        modifier &&
+        event.key.toLowerCase() ===
+          "x" &&
+        selectedIds.size
+      ) {
+        event.preventDefault();
+        copyElements(
+          selectedIds,
+        );
+        deleteElements(
+          selectedIds,
+        );
+        return;
+      }
+
+      if (
+        modifier &&
+        event.key.toLowerCase() ===
+          "v"
+      ) {
+        const pageId =
+          pages[current]?.id;
+
+        if (
+          pageId &&
+          clipboardRef.current?.length
+        ) {
+          event.preventDefault();
+          pasteElements(
+            pageId,
+          );
+        }
+
+        return;
+      }
+
+      if (
+        modifier &&
+        event.key.toLowerCase() ===
+          "a"
+      ) {
+        event.preventDefault();
+
+        if (
+          activeTool ===
+            "select" &&
+          elements.length
+        ) {
+          const pageId =
+            pages[current]?.id;
+
+          if (
+            pageId
+          ) {
+            setSelectedIds(
+              new Set(
+                elements
+                  .filter(
+                    (element) =>
+                      element.pageId ===
+                      pageId,
+                  )
+                  .map(
+                    (element) =>
+                      element.id,
+                  ),
+              ),
+            );
+          }
+        } else {
+          selectAllPages();
+        }
+
+        return;
+      }
+
+      if (
+        modifier &&
+        event.key.toLowerCase() ===
+          "f"
+      ) {
+        event.preventDefault();
+        setShowSearch(
+          true,
+        );
+        return;
+      }
+
+      if (
+        (event.key ===
+          "Delete" ||
+          event.key ===
+            "Backspace") &&
+        selectedIds.size
+      ) {
+        event.preventDefault();
+
+        deleteElements(
+          selectedIds,
+        );
+
+        return;
+      }
+
+      if (
+        event.key ===
+        "Escape"
+      ) {
+        if (
+          editingTextId
+        ) {
+          finishTextEdit(
+            editingTextId,
+            editingOriginalTextRef
+              .current[
+              editingTextId
+            ] ?? "",
+            true,
+          );
+
+          return;
+        }
+
+        setSelectedIds(
+          new Set(),
+        );
+
+        setActiveTool(
+          "select",
+        );
+
+        setShowSearch(
+          false,
+        );
+
+        return;
+      }
+
+      if (
+        [
+          "ArrowDown",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowLeft",
+        ].includes(
+          event.key,
+        ) &&
+        selectedIds.size
+      ) {
+        event.preventDefault();
+
+        const amount =
+          event.shiftKey
+            ? NUDGE_FAST
+            : NUDGE;
+
+        const dx =
+          event.key ===
+          "ArrowRight"
+            ? amount
+            : event.key ===
+                "ArrowLeft"
+              ? -amount
+              : 0;
+
+        const dy =
+          event.key ===
+          "ArrowDown"
+            ? amount
+            : event.key ===
+                "ArrowUp"
+              ? -amount
+              : 0;
+
+        updateElements(
+          selectedIds,
+          (element) => ({
+            x:
+              element.x +
+              dx,
+            y:
+              element.y +
+              dy,
+          }),
+        );
+
+        return;
+      }
+
+      if (
+        !modifier &&
+        !editingTextId
+      ) {
+        if (
+          event.key.toLowerCase() ===
+          "v"
+        ) {
+          event.preventDefault();
+          setActiveTool(
+            "select",
+          );
+        } else if (
+          event.key.toLowerCase() ===
+          "h"
+        ) {
+          event.preventDefault();
+          setActiveTool(
+            "hand",
+          );
+        } else if (
+          event.key.toLowerCase() ===
+          "t"
+        ) {
+          event.preventDefault();
+          setActiveTool(
+            "text",
+          );
+        }
+      }
+    }
+
+    window.addEventListener(
+      "keydown",
+      onKey,
+    );
+
+    return () =>
+      window.removeEventListener(
+        "keydown",
+        onKey,
+      );
+  }, [
+    activeTool,
+    copyElements,
+    deleteElements,
+    duplicateElements,
+    elements,
+    editingTextId,
+    finishTextEdit,
+    pages,
+    pasteElements,
+    redo,
+    selectAllPages,
+    selectedIds,
+    undo,
+    updateElements,
+  ]);
+
+  const runSearch =
+    useCallback(
+      async (
+        query: string,
+      ) => {
+        setSearchQuery(
+          query,
+        );
+
+        setSearchActiveIdx(
+          0,
+        );
+
+        if (
+          !pdf ||
+          !query.trim()
+        ) {
+          setSearchResults(
+            [],
+          );
+          return;
+        }
+
+        setSearching(
+          true,
+        );
+
+        try {
+          const results: SearchResult[] =
+            [];
+
+          for (
+            let index = 0;
+            index <
+            pages.length;
+            index += 1
+          ) {
+            const originalIndex =
+              pages[index]
+                .originalIndex;
+
+            if (
+              originalIndex <
+              0
+            ) {
+              continue;
+            }
+
+            let text =
+              textCacheRef
+                .current[
+                originalIndex
+              ];
+
+            if (
+              text == null
+            ) {
+              try {
+                const page =
+                  await pdf.getPage(
+                    originalIndex +
+                      1,
+                  );
+
+                const content =
+                  await page.getTextContent?.();
+
+                text = content
+                  ? content.items
+                      .map(
+                        (item) =>
+                          item.str,
+                      )
+                      .join(" ")
+                  : "";
+              } catch {
+                text = "";
+              }
+
+              textCacheRef.current[
+                originalIndex
+              ] = text;
+            }
+
+            const matchIndex =
+              text
+                .toLowerCase()
+                .indexOf(
+                  query.toLowerCase(),
+                );
+
+            if (
+              matchIndex >=
+              0
+            ) {
+              const start =
+                Math.max(
+                  0,
+                  matchIndex -
+                    30,
+                );
+
+              results.push({
+                pageIndex:
+                  index,
+                snippet: `${
+                  start
+                    ? "…"
+                    : ""
+                }${text.slice(
+                  start,
+                  matchIndex +
+                    query.length +
+                    30,
+                )}…`,
+              });
+            }
+          }
+
+          setSearchResults(
+            results,
+          );
+        } finally {
+          setSearching(
+            false,
+          );
+        }
+      },
+      [pages, pdf],
+    );
+
+  const jumpToSearchResult =
+    useCallback(
+      (index: number) => {
+        if (
+          !searchResults.length
+        ) {
+          return;
+        }
+
+        const resultIndex =
+          ((index %
+            searchResults.length) +
+            searchResults.length) %
+          searchResults.length;
+
+        setSearchActiveIdx(
+          resultIndex,
+        );
+
+        handlePageClick(
+          searchResults[
+            resultIndex
+          ].pageIndex,
+        );
+      },
+      [
+        handlePageClick,
+        searchResults,
+      ],
+    );
+
+  const readImageFile =
+    useCallback(
+      (
+        inputFile: File,
+      ): Promise<{
+        src: string;
+        width: number;
+        height: number;
+      }> =>
+        new Promise(
+          (
+            resolve,
+            reject,
+          ) => {
+            const reader =
+              new FileReader();
+
+            reader.onerror =
+              () =>
+                reject(
+                  new Error(
+                    "Could not read that image file.",
+                  ),
+                );
+
+            reader.onload = () => {
+              const src =
+                String(
+                  reader.result,
+                );
+
+              const image =
+                new Image();
+
+              image.onerror =
+                () =>
+                  reject(
+                    new Error(
+                      "Could not decode that image.",
+                    ),
+                  );
+
+              image.onload =
+                () => {
+                  const mime =
+                    inputFile.type.toLowerCase();
+
+                  if (
+                    mime ===
+                      "image/png" ||
+                    mime ===
+                      "image/jpeg"
+                  ) {
+                    resolve({
+                      src,
+                      width:
+                        image.width,
+                      height:
+                        image.height,
+                    });
+
+                    return;
+                  }
+
+                  const canvas =
+                    document.createElement(
+                      "canvas",
+                    );
+
+                  canvas.width =
+                    image.width;
+
+                  canvas.height =
+                    image.height;
+
+                  const context =
+                    canvas.getContext(
+                      "2d",
+                    );
+
+                  if (!context) {
+                    reject(
+                      new Error(
+                        "Could not decode that image.",
+                      ),
+                    );
+
+                    return;
+                  }
+
+                  context.drawImage(
+                    image,
+                    0,
+                    0,
+                  );
+
+                  resolve({
+                    src:
+                      canvas.toDataURL(
+                        "image/png",
+                      ),
+                    width:
+                      image.width,
+                    height:
+                      image.height,
+                  });
+                };
+
+              image.src = src;
+            };
+
+            reader.readAsDataURL(
+              inputFile,
+            );
+          },
+        ),
+      [],
+    );
+
+  const chooseImage =
+    useCallback(
+      async (
+        replaceId?: string,
+      ) => {
+        if (
+          !pages[current]
+        ) {
+          return;
+        }
+
+        setImagePickerState(
+          "loading",
+        );
+
+        setImagePickerError(
+          null,
+        );
+
+        try {
+          const picked =
+            await pickFile({
+              accept:
+                "image/png,image/jpeg,image/webp,image/svg+xml",
+              multiple:
+                false,
+            });
+
+          const selectedFile = Array.isArray(
+            picked,
+          )
+            ? picked[0]
+            : picked;
+
+          if (!selectedFile) {
+            setImagePickerState(
+              "idle",
+            );
+
+            setActiveTool(
+              "select",
+            );
+
+            return;
+          }
+
+          const image =
+            await readImageFile(
+              selectedFile,
+            );
+
+          if (replaceId) {
+            const currentElement =
+              elements.find(
+                (element) =>
+                  element.id ===
+                  replaceId,
+              );
+
+            if (
+              !currentElement ||
+              currentElement.type !==
+                "image"
+            ) {
+              throw new Error(
+                "The selected image no longer exists.",
+              );
+            }
+
+            const scale =
+              Math.min(
+                1,
+                Math.min(
+                  currentElement.width /
+                    Math.max(
+                      1,
+                      image.width,
+                    ),
+                  currentElement.height /
+                    Math.max(
+                      1,
+                      image.height,
+                    ),
+                ),
+              );
+
+            updateElement(
+              replaceId,
+              {
+                src:
+                  image.src,
+                width:
+                  Math.max(
+                    16,
+                    image.width *
+                      scale,
+                  ),
+                height:
+                  Math.max(
+                    16,
+                    image.height *
+                      scale,
+                  ),
+              },
+            );
+          } else {
+            const scale =
+              Math.min(
+                1,
+                220 /
+                  Math.max(
+                    1,
+                    image.width,
+                  ),
+              );
+
+            addElement({
+              id: makeId(
+                "img",
+              ),
+              pageId:
+                pages[current].id,
+              type: "image",
+              x: 60,
+              y: 60,
+              width:
+                image.width *
+                scale,
+              height:
+                image.height *
+                scale,
+              opacity: 1,
+              rotation: 0,
+              src: image.src,
+            } as ImageElement);
+          }
+
+          setImagePickerState(
+            "idle",
+          );
+        } catch (error) {
+          const message =
+            error instanceof
+            Error
+              ? error.message
+              : "Could not add the image.";
+
+          setImagePickerError(
+            message,
+          );
+
+          setImagePickerState(
+            "error",
+          );
+
+          setActiveTool(
+            "select",
+          );
+
+          toast.error(
+            message,
+          );
+
+          window.setTimeout(
+            () => {
+              setImagePickerState(
+                "idle",
+              );
+
+              setImagePickerError(
+                null,
+              );
+            },
+            3500,
+          );
+        }
+      },
+      [
+        addElement,
+        current,
+        elements,
+        pages,
+        readImageFile,
+        updateElement,
+      ],
+    );
+
+  const openNewImage =
+    useCallback(
+      () => {
+        setActiveTool(
+          "image",
+        );
+
+        void chooseImage();
+      },
+      [chooseImage],
+    );
+
+  const openReplacementImage =
+    useCallback(
+      () => {
+        const id =
+          selectedElements.length ===
+            1 &&
+          selectedElements[0]
+            .type === "image"
+            ? selectedElements[0]
+                .id
+            : undefined;
+
+        if (id) {
+          void chooseImage(
+            id,
+          );
+        }
+      },
+      [
+        chooseImage,
+        selectedElements,
+      ],
+    );
+
+  const handleSignatureInsert =
+    useCallback(
+      (
+        src: string,
+        save: boolean,
+      ) => {
+        if (save) {
+          const saved =
+            saveSignature(
+              src,
+            );
+
+          setSavedSignatures(
+            (
+              currentSignatures,
+            ) =>
+              [
+                saved,
+                ...currentSignatures,
+              ].slice(0, 12),
+          );
+        }
+
+        const pageId =
+          pages[current]?.id;
+
+        if (!pageId) {
+          return;
+        }
+
+        addElement({
+          id: makeId(
+            "sig",
+          ),
+          pageId,
+          type: "image",
+          x: 80,
+          y: 80,
+          width: 180,
+          height: 70,
+          opacity: 1,
+          rotation: 0,
+          src,
+        } as ImageElement);
+
+        setSignatureOpen(
+          false,
+        );
+      },
+      [
+        addElement,
+        current,
+        pages,
+      ],
+    );
+
+  const handleLoadCustomFont =
+    useCallback(
+      async (
+        id: string,
+        family: string,
+      ) => {
+        if (
+          FONT_OPTIONS.includes(
+            family as typeof FONT_OPTIONS[number],
+          )
+        ) {
+          updateElement(
+            id,
+            {
+              font: family,
+              fontData:
+                undefined,
+            },
+          );
+
+          return;
+        }
+
+        try {
+          const fontData =
+            await loadGoogleFontData(
+              family,
+            );
+
+          const fontFace =
+            new FontFace(
+              family,
+              `url(${fontData})`,
+            );
+
+          await fontFace.load();
+
+          document.fonts.add(
+            fontFace,
+          );
+
+          updateElement(
+            id,
+            {
+              font: family,
+              fontData,
+            },
+          );
+        } catch (error) {
+          toast.error(
+            error instanceof
+            Error
+              ? error.message
+              : `Could not embed ${family}.`,
+          );
+        }
+      },
+      [updateElement],
+    );
+
+  const apply =
+    useCallback(
+      async () => {
+        if (
+          processing ||
+          busy
+        ) {
+          return;
+        }
+
+        setProcessing(
+          true,
+        );
+
+        setSaveStatus(
+          "saving",
+        );
+
+        try {
+          const result =
+            await onApply({
+              pages,
+              selectedIds:
+                new Set(
+                  pages
+                    .filter(
+                      (page) =>
+                        page.selected,
+                    )
+                    .map(
+                      (page) =>
+                        page.id,
+                    ),
+                ),
+            });
+
+          if (
+            !result ||
+            !("blob" in result)
+          ) {
+            setSaveStatus(
+              "unsaved",
+            );
+
+            return;
+          }
+
+          let finalBlob =
+            result.blob;
+
+          try {
+            finalBlob =
+              await stampElements(
+                result.blob,
+                pages,
+                elements,
+              );
+          } catch (error) {
+            console.error(
+              "Stamp failed",
+              error,
+            );
+
+            toast.error(
+              "Saved, but some annotations could not be embedded.",
+            );
+          }
+
+          let thumbUrl:
+            | string
+            | null = null;
+
+          let pageCount =
+            pages.length;
+
+          try {
+            const {
+              loadPdf,
+              renderPdfPageToCanvas,
+              canvasToBlob,
+            } = await import(
+              "@/lib/pdf-render"
+            );
+
+            const doc =
+              await loadPdf(
+                new File(
+                  [
+                    finalBlob,
+                  ],
+                  result.filename,
+                  {
+                    type: "application/pdf",
+                  },
+                ),
+              );
+
+            pageCount =
+              doc.numPages;
+
+            const canvas =
+              await renderPdfPageToCanvas(
+                doc,
+                1,
+                1.2,
+              );
+
+            const blob =
+              await canvasToBlob(
+                canvas,
+                "image/png",
+              );
+
+            thumbUrl =
+              URL.createObjectURL(
+                blob,
+              );
+          } catch {
+            /* preview is optional */
+          }
+
+          setSuccess({
+            blob:
+              finalBlob,
+            filename:
+              result.filename,
+            thumb:
+              thumbUrl,
+            pages:
+              pageCount,
+          });
+
+          setSaveStatus(
+            "saved",
+          );
+
+          clearEditorDraft(
+            fileKey,
+          );
+
+          const url =
+            URL.createObjectURL(
+              finalBlob,
+            );
+
+          publishResult({
+            name:
+              result.filename,
+            mime:
+              "application/pdf",
+            size:
+              finalBlob.size,
+            url,
+            createdAt:
+              Date.now(),
+          });
+        } catch (error) {
+          setSaveStatus(
+            "unsaved",
+          );
+
+          console.error(
+            "Save failed",
+            error,
+          );
+
+          toast.error(
+            "Something went wrong while saving. Your edits are still here — try again.",
+          );
+        } finally {
+          setProcessing(
+            false,
+          );
+        }
+      },
+      [
+        busy,
+        elements,
+        fileKey,
+        onApply,
+        pages,
+        processing,
+      ],
+    );
+
+  const saveAsDownload =
+    useCallback(
+      () => {
+        if (!success) {
+          return;
+        }
+
+        const anchor =
+          document.createElement(
+            "a",
+          );
+
+        anchor.href =
+          URL.createObjectURL(
+            success.blob,
+          );
+
+        anchor.download =
+          success.filename;
+
+        anchor.click();
+
+        window.setTimeout(
+          () =>
+            URL.revokeObjectURL(
+              anchor.href,
+            ),
+          1000,
+        );
+      },
+      [success],
+    );
+
+  if (
+    phase === "error"
+  ) {
     return (
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-100 dark:bg-gray-950 p-4">
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 text-center shadow-xl max-w-md w-full">
-          <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-red-50 text-red-600"><Lock className="h-6 w-6" /></div>
-          <h3 className="text-xl font-bold">Couldn't open this PDF</h3>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">{errorMsg}</p>
-          <Button variant="outline" onClick={onReplace} className="mt-5">Choose another file</Button>
+      <div className="fixed inset-0 z-[9999] grid place-items-center bg-slate-100 p-5 dark:bg-slate-950">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/40">
+            <Lock className="h-6 w-6" />
+          </div>
+
+          <h3 className="mt-4 text-xl font-semibold text-slate-900 dark:text-white">
+            Couldn’t open this PDF
+          </h3>
+
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {errorMsg}
+          </p>
+
+          <Button
+            variant="outline"
+            onClick={
+              onReplace
+            }
+            className="mt-5 rounded-xl"
+          >
+            Choose another
+            file
+          </Button>
         </div>
       </div>
     );
@@ -448,1588 +3062,522 @@ export function PdfEditor({ file, mode, actionLabel, busy = false, onReplace, on
 
   if (success) {
     return (
-      <div className="fixed inset-0 z-[9999] overflow-y-auto bg-gray-100 dark:bg-gray-950 p-4 sm:p-8 flex items-center justify-center">
-        <SuccessScreen result={success} onDownload={() => { const a = document.createElement("a"); a.href = URL.createObjectURL(success.blob); a.download = success.filename; a.click(); }} onEditAgain={() => setSuccess(null)} onNewFile={onReplace} />
-      </div>
+      <SuccessScreen
+        result={success}
+        onDownload={
+          saveAsDownload
+        }
+        onEditAgain={() =>
+          setSuccess(null)
+        }
+        onNewFile={
+          onReplace
+        }
+      />
     );
   }
 
-  const annotateDisabled = !pages[current] || pages[current].rotation !== 0;
-  const shapeTools: { tool: Tool; icon: React.ReactNode; label: string }[] = [
-    { tool: "shape-rect", icon: <Square className="w-4 h-4" />, label: "Rectangle" },
-    { tool: "shape-ellipse", icon: <span className="w-4 h-4 flex items-center justify-center"><svg width="14" height="14"><ellipse cx="7" cy="7" rx="6" ry="6" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></span>, label: "Ellipse" },
-    { tool: "shape-line", icon: <Minus className="w-4 h-4" />, label: "Line" },
-    { tool: "shape-arrow", icon: <ArrowRight className="w-4 h-4" />, label: "Arrow" },
-    { tool: "shape-triangle", icon: <Triangle className="w-4 h-4" />, label: "Triangle" },
-    { tool: "shape-star", icon: <Star className="w-4 h-4" />, label: "Star" },
-    { tool: "shape-rounded-rect", icon: <span className="w-4 h-4 flex items-center justify-center"><svg width="14" height="14"><rect x="1" y="2" width="12" height="10" rx="3" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></span>, label: "Rounded" },
-    { tool: "shape-speech", icon: <MessageSquare className="w-4 h-4" />, label: "Bubble" },
-  ];
-  const activeShapeEntry = shapeTools.find((s) => s.tool === activeShape);
-
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden select-none font-sans">
-      <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onImageChosen(e.target.files); e.target.value = ""; }} />
+    <div className="fixed inset-0 z-[9999] flex flex-col overflow-hidden bg-slate-50 font-sans dark:bg-slate-950">
+      <Toolbar
+        fileName={
+          file.name
+        }
+        pageCount={
+          pages.length
+        }
+        saveStatus={
+          saveStatus
+        }
+        actionLabel={
+          actionLabel
+        }
+        busy={busy}
+        processing={
+          processing
+        }
+        canUndo={
+          canUndo
+        }
+        canRedo={
+          canRedo
+        }
+        onUndo={
+          undo
+        }
+        onRedo={
+          redo
+        }
+        onApply={
+          apply
+        }
+        onReplace={
+          onReplace
+        }
+        activeTool={
+          activeTool
+        }
+        activeShape={
+          activeShape
+        }
+        annotateDisabled={
+          annotateDisabled
+        }
+        editingTextId={
+          editingTextId
+        }
+        selectedIds={
+          selectedIds
+        }
+        selectedElements={
+          selectedElements
+        }
+        current={
+          current
+        }
+        pages={pages}
+        showSearch={
+          showSearch
+        }
+        searchQuery={
+          searchQuery
+        }
+        searchResults={
+          searchResults
+        }
+        searchActiveIdx={
+          searchActiveIdx
+        }
+        searching={
+          searching
+        }
+        onSearchToggle={() =>
+          setShowSearch(
+            (value) =>
+              !value,
+          )
+        }
+        onSearch={
+          runSearch
+        }
+        onSearchJump={
+          jumpToSearchResult
+        }
+        onSearchClose={() => {
+          setShowSearch(
+            false,
+          );
+          setSearchQuery(
+            "",
+          );
+          setSearchResults(
+            [],
+          );
+        }}
+        onSetActiveTool={(
+          tool,
+        ) => {
+          setActiveTool(
+            tool,
+          );
 
-      {/* HEADER */}
-      <header className="h-12 shrink-0 flex items-center justify-between gap-3 px-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 z-30">
-        <div className="flex items-center gap-2 min-w-0">
-          <button onClick={onReplace} className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"><ArrowLeft className="w-4 h-4" /></button>
-          <div className="w-px h-5 bg-gray-200 dark:bg-gray-700" />
-          <span className="text-sm font-semibold truncate max-w-[220px] sm:max-w-[420px]">{file.name}</span>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <button onClick={undo} disabled={!canUndo} className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:pointer-events-none" title="Undo (Ctrl+Z)"><Undo2 className="w-4 h-4" /></button>
-          <button onClick={redo} disabled={!canRedo} className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:pointer-events-none" title="Redo (Ctrl+Shift+Z)"><Redo2 className="w-4 h-4" /></button>
-          <button onClick={() => setShowSearch((s) => !s)} className={cn("p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800", showSearch ? "text-[#DC2626] bg-red-50 dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300")} title="Search (Ctrl+F)"><Search className="w-4 h-4" /></button>
-          <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 hidden sm:block" />
-          <Button onClick={apply} disabled={processing || busy} size="sm" className="hidden sm:inline-flex h-8 rounded-md bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm px-3 gap-1.5">
-            {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {processing ? "Saving…" : actionLabel || "Save changes"}
-          </Button>
-        </div>
-      </header>
+          if (
+            tool !==
+            "select"
+          ) {
+            setSelectedIds(
+              new Set(),
+            );
+          }
+        }}
+        onSetActiveShape={
+          setActiveShape
+        }
+        onOpenImage={
+          openNewImage
+        }
+        onOpenSignature={() => {
+          setActiveTool(
+            "signature",
+          );
 
-      {/* SEARCH BAR */}
-      <AnimatePresence>
-        {showSearch && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden z-20">
-            <div className="flex items-center gap-2 px-3 py-2">
-              <Search className="w-4 h-4 text-gray-400 shrink-0" />
-              <input autoFocus value={searchQuery} onChange={(e) => runSearch(e.target.value)} placeholder="Search in document…" className="flex-1 h-8 text-sm bg-transparent outline-none text-gray-800 dark:text-gray-100 placeholder:text-gray-400" />
-              {searching && <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 shrink-0" />}
-              {!searching && searchQuery && <span className="text-xs text-gray-500 shrink-0">{searchResults.length > 0 ? `${searchActiveIdx + 1} / ${searchResults.length}` : "No results"}</span>}
-              <button onClick={() => jumpToResult(searchActiveIdx - 1)} disabled={!searchResults.length} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-600 dark:text-gray-300"><ChevronLeft className="w-4 h-4" /></button>
-              <button onClick={() => jumpToResult(searchActiveIdx + 1)} disabled={!searchResults.length} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-600 dark:text-gray-300"><ChevronRight className="w-4 h-4" /></button>
-              <button onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><X className="w-4 h-4" /></button>
+          setSignatureOpen(
+            true,
+          );
+        }}
+        onDelete={() =>
+          deleteElements(
+            selectedIds,
+          )
+        }
+        onDuplicate={() =>
+          duplicateElements(
+            selectedIds,
+          )
+        }
+        onUpdateElement={
+          updateElement
+        }
+        onUpdateElements={
+          updateElements
+        }
+        onAlign={(mode) =>
+          alignElements(
+            selectedIds,
+            mode,
+          )
+        }
+        onDistribute={(axis) =>
+          distributeElements(
+            selectedIds,
+            axis,
+          )
+        }
+        onReorder={(dir) =>
+          reorderZ(
+            selectedIds,
+            dir,
+          )
+        }
+        onOpenImageForSelected={
+          openReplacementImage
+        }
+        onLoadCustomFont={
+          handleLoadCustomFont
+        }
+        selectionRect={
+          selectionRect
+        }
+        drawStroke={
+          drawStroke
+        }
+        setDrawStroke={
+          setDrawStroke
+        }
+        eraserSize={
+          eraserSize
+        }
+        setEraserSize={
+          setEraserSize
+        }
+        highlightSettings={
+          highlightSettings
+        }
+        setHighlightSettings={
+          setHighlightSettings
+        }
+        shapeDefaults={
+          shapeDefaults
+        }
+        setShapeDefaults={
+          setShapeDefaults
+        }
+        thumbs={thumbs}
+        showPagePanel={
+          showPagePanel
+        }
+        onTogglePagePanel={() =>
+          setShowPagePanel(
+            (value) =>
+              !value,
+          )
+        }
+        onPageClick={
+          handlePageClick
+        }
+        onRotatePage={
+          rotatePage
+        }
+        onDeletePage={
+          deletePage
+        }
+        onDuplicatePage={
+          duplicatePage
+        }
+        onInsertBlankPage={
+          insertBlankPage
+        }
+        onMovePage={
+          movePage
+        }
+      />
+
+      <main className="min-h-0 flex-1">
+        {phase ===
+          "reading" ||
+        phase ===
+          "rendering" ? (
+          <div className="grid h-full place-items-center text-sm text-slate-400">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Preparing document…
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* TOOLBAR */}
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-x-auto z-20">
-        <ToolBtn icon={<MousePointer2 />} label="Select" active={activeTool === "select"} onClick={() => { setActiveTool("select"); setSelectedIds(new Set()); }} />
-        <ToolBtn icon={<Hand />} label="Hand" active={activeTool === "hand"} onClick={() => { setActiveTool("hand"); setSelectedIds(new Set()); }} />
-        <Divider />
-        <ToolBtn icon={<Type />} label="Text" active={activeTool === "text"} disabled={annotateDisabled} onClick={() => { setActiveTool("text"); setSelectedIds(new Set()); }} />
-        <ToolBtn icon={<ImageIcon />} label="Image" active={activeTool === "image"} disabled={annotateDisabled} onClick={() => { setActiveTool("image"); imageInputRef.current?.click(); }} />
-        <ToolBtn icon={<PenLine />} label="Draw" active={activeTool === "draw"} disabled={annotateDisabled} onClick={() => { setActiveTool("draw"); setSelectedIds(new Set()); }} />
-        <ToolBtn icon={<Eraser />} label="Eraser" active={activeTool === "eraser"} disabled={annotateDisabled} onClick={() => { setActiveTool("eraser"); setSelectedIds(new Set()); }} />
-        <ToolBtn icon={<Highlighter />} label="Highlight" active={activeTool === "highlight"} disabled={annotateDisabled} onClick={() => { setActiveTool("highlight"); setSelectedIds(new Set()); }} />
-
-        {/* Shape picker button */}
-        <div ref={shapeBtnRef} className="relative shrink-0">
-          <button disabled={annotateDisabled} onClick={() => {
-            if (!showShapePicker && shapeBtnRef.current) { const r = shapeBtnRef.current.getBoundingClientRect(); setShapePickerPos({ top: r.bottom + 4, left: r.left }); }
-            setShowShapePicker((s) => !s);
-          }} className={cn("flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 transition-colors", activeTool.startsWith("shape") ? "bg-red-50 text-[#DC2626] dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800", annotateDisabled && "opacity-35 pointer-events-none")}>
-            <span className="w-4 h-4 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4">{activeShapeEntry?.icon ?? <Square className="w-4 h-4" />}</span>
-            <span className="hidden md:inline">Shapes</span>
-            <ChevronDown className="w-3 h-3" />
-          </button>
-        </div>
-
-        <ToolBtn icon={<PenTool />} label="Sign" active={activeTool === "signature"} disabled={annotateDisabled} onClick={() => { setActiveTool("signature"); setSignatureOpen(true); }} />
-        <Divider />
-        <div ref={moreBtnRef} className="relative shrink-0">
-          <ToolBtn icon={<MoreHorizontal />} label="More" active={showMoreTools || ["whiteout","sticky"].includes(activeTool)} disabled={annotateDisabled}
-            onClick={() => { if (!showMoreTools && moreBtnRef.current) { const r = moreBtnRef.current.getBoundingClientRect(); setMoreToolsPos({ top: r.bottom + 4, left: r.left }); } setShowMoreTools((s) => !s); }} />
-        </div>
-
-        {/* Draw settings inline */}
-        {activeTool === "draw" && (
-          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700 flex-wrap">
-            <input
-              type="color"
-              value={drawStroke.color}
-              onChange={(e) => { setDrawStroke((s) => ({ ...s, color: e.target.value })); pushRecentColor(e.target.value); }}
-              className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0"
-              title="Ink color"
-            />
-            {recentColors.length > 0 && (
-              <div className="flex items-center gap-1">
-                {recentColors.slice(0, 5).map((c) => (
-                  <button key={c} onClick={() => setDrawStroke((s) => ({ ...s, color: c }))}
-                    className="w-4 h-4 rounded-full border border-gray-300" style={{ background: c }} title={c} />
-                ))}
-              </div>
-            )}
-            <div className="flex items-center gap-1">
-              {BRUSH_PRESETS.map((p) => (
-                <button key={p.label} onClick={() => setDrawStroke((s) => ({ ...s, width: p.size }))} title={`${p.label} (${p.size}px)`}
-                  className={cn("w-7 h-7 rounded-md flex items-center justify-center border", drawStroke.width === p.size ? "border-[#DC2626] bg-red-50 dark:bg-red-900/30" : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800")}>
-                  <span className="rounded-full bg-current" style={{ width: Math.min(p.size, 16), height: Math.min(p.size, 16), color: drawStroke.color }} />
-                </button>
-              ))}
-            </div>
-            <input type="range" min={1} max={30} value={drawStroke.width} onChange={(e) => setDrawStroke((s) => ({ ...s, width: Number(e.target.value) }))} className="w-16 accent-[#DC2626]" title="Custom size" />
-            <span className="text-xs text-gray-400 w-6 tabular-nums">{drawStroke.width}px</span>
           </div>
+        ) : (
+          <EditorCanvas
+            pdf={pdf}
+            pages={pages}
+            zoom={zoom}
+            fitMode={
+              fitMode
+            }
+            current={
+              current
+            }
+            onCurrentChange={
+              setCurrent
+            }
+            phase={phase}
+            onToggleSelect={(
+              index,
+            ) =>
+              commit(
+                pages.map(
+                  (
+                    page,
+                    pageIndex,
+                  ) =>
+                    pageIndex ===
+                    index
+                      ? {
+                          ...page,
+                          selected:
+                            !page.selected,
+                        }
+                      : page,
+                ),
+                elements,
+              )
+            }
+            selectionMode={
+              false
+            }
+            elements={
+              elements
+            }
+            activeTool={
+              activeTool
+            }
+            selectedIds={
+              selectedIds
+            }
+            onSetSelectedIds={
+              setSelectedIds
+            }
+            onAddElement={
+              addElement
+            }
+            onAddElementKeepTool={
+              addElementKeepTool
+            }
+            onAddTextAt={
+              addTextAt
+            }
+            onBeginTextEdit={
+              beginTextEdit
+            }
+            onFinishTextEdit={
+              finishTextEdit
+            }
+            editingTextId={
+              editingTextId
+            }
+            onUpdateElement={
+              updateElement
+            }
+            onUpdateElements={
+              updateElements
+            }
+            onDuplicateElements={
+              duplicateElements
+            }
+            onReplaceElements={
+              replaceElements
+            }
+            onSelectionRectChange={
+              setSelectionRect
+            }
+            onZoomChange={(
+              nextZoom,
+            ) => {
+              setZoom(
+                nextZoom,
+              );
+              setFitMode(
+                "custom",
+              );
+            }}
+            onFitWidth={() => {
+              setZoom(1);
+              setFitMode(
+                "width",
+              );
+            }}
+            panStateRef={
+              panStateRef
+            }
+            drawStroke={
+              drawStroke
+            }
+            eraserSize={
+              eraserSize
+            }
+            highlightSettings={
+              highlightSettings
+            }
+            shapeDefaults={
+              shapeDefaults
+            }
+          />
         )}
+      </main>
 
-        {/* Eraser settings inline */}
-        {activeTool === "eraser" && (
-          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700 flex-wrap">
-            <div className="flex items-center gap-1">
-              {ERASER_PRESETS.map((sz) => (
-                <button key={sz} onClick={() => setEraserSize(sz)} title={`${sz}px`}
-                  className={cn("w-7 h-7 rounded-md flex items-center justify-center border", eraserSize === sz ? "border-[#DC2626] bg-red-50 dark:bg-red-900/30" : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800")}>
-                  <span className="rounded-full border border-current" style={{ width: Math.min(sz, 18), height: Math.min(sz, 18) }} />
-                </button>
-              ))}
-            </div>
-            <input type="range" min={5} max={60} value={eraserSize} onChange={(e) => setEraserSize(Number(e.target.value))} className="w-16 accent-[#DC2626]" />
-            <span className="text-xs text-gray-400 w-6 tabular-nums">{eraserSize}px</span>
-          </div>
-        )}
-
-        {/* Highlight settings inline */}
-        {activeTool === "highlight" && (
-          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200 dark:border-gray-700 flex-wrap">
-            <div className="flex items-center gap-1">
-              {HIGHLIGHT_COLORS.map((c) => (
-                <button key={c.value} onClick={() => setHighlightSettings((s) => ({ ...s, color: c.value }))} title={c.label}
-                  className={cn("w-6 h-6 rounded-full border-2", highlightSettings.color === c.value ? "border-[#DC2626]" : "border-gray-200")}
-                  style={{ background: c.value }} />
-              ))}
-            </div>
-            <select value={highlightSettings.opacity} onChange={(e) => setHighlightSettings((s) => ({ ...s, opacity: Number(e.target.value) }))}
-              className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1">
-              {HIGHLIGHT_OPACITIES.map((o) => <option key={o} value={o}>{Math.round(o * 100)}%</option>)}
-            </select>
-          </div>
-        )}
-
-        <div className="ml-auto sm:hidden">
-          <Button onClick={apply} disabled={processing || busy} size="sm" className="h-8 rounded-md bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-xs px-3 gap-1.5">
-            {processing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Save
-          </Button>
+      {imagePickerState ===
+        "loading" && (
+        <div className="pointer-events-none fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading image…
         </div>
-      </div>
-
-      <TopPropertyToolbar
-        activeTool={activeTool}
-        selectedElements={selectedElements}
-        singleSelected={singleSelected}
-        drawStroke={drawStroke} setDrawStroke={setDrawStroke}
-        eraserSize={eraserSize} setEraserSize={setEraserSize}
-        highlightSettings={highlightSettings} setHighlightSettings={setHighlightSettings}
-        shapeDefaults={shapeDefaults} setShapeDefaults={setShapeDefaults}
-        recentColors={recentColors} pushRecentColor={pushRecentColor}
-        onUpdateElement={updateElement}
-        onUpdateElements={(patch) => updateElements(selectedIds, () => patch)}
-        onDeleteElements={() => deleteElements(selectedIds)}
-        onDuplicateElements={() => duplicateElements(selectedIds)}
-        onBringForward={() => reorderZ(selectedIds, "forward")}
-        onSendBackward={() => reorderZ(selectedIds, "backward")}
-        onBringToFront={() => reorderZ(selectedIds, "front")}
-        onSendToBack={() => reorderZ(selectedIds, "back")}
-        textPreviewFonts={textPreviewFonts} onSetPreviewFont={setPreviewFont}
-        onImageReplace={() => imageInputRef.current?.click()}/>
-
-      {/* Portals */}
-      {typeof document !== "undefined" && createPortal(
-        <>
-          <AnimatePresence>
-            {showMoreTools && moreToolsPos && (
-              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} style={{ position: "fixed", top: moreToolsPos.top, left: moreToolsPos.left }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 w-44 z-[10000]">
-                <button onClick={() => { setActiveTool("whiteout"); setSelectedIds(new Set()); setShowMoreTools(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"><Eraser className="w-4 h-4" /> Whiteout</button>
-                <button onClick={() => { setActiveTool("sticky"); setSelectedIds(new Set()); setShowMoreTools(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"><MessageSquare className="w-4 h-4" /> Sticky note</button>
-                <div className="h-px bg-gray-100 dark:bg-gray-800 my-1" />
-                {(["field-text","field-checkbox","field-radio","field-dropdown"] as Tool[]).map((t) => (
-                  <button key={t} onClick={() => { setActiveTool(t); setSelectedIds(new Set()); setShowMoreTools(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">{t.replace("field-", "").replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase())}</button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <AnimatePresence>
-            {showShapePicker && shapePickerPos && (
-              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} style={{ position: "fixed", top: shapePickerPos.top, left: shapePickerPos.left }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 z-[10000] grid grid-cols-4 gap-1 w-52">
-                {shapeTools.map((s) => (
-                  <button key={s.tool} title={s.label} onClick={() => { setActiveShape(s.tool); setActiveTool(s.tool); setSelectedIds(new Set()); setShowShapePicker(false); }}
-                    className={cn("flex flex-col items-center gap-1 p-2 rounded-md text-xs transition-colors", activeTool === s.tool ? "bg-red-50 text-[#DC2626] dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800")}>
-                    <span className="w-4 h-4 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4">{s.icon}</span>
-                    <span className="leading-none text-center">{s.label}</span>
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </>,
-        document.body
       )}
 
-      {/* BODY */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* LEFT SIDEBAR */}
-        <AnimatePresence initial={false}>
-          {showLeftSidebar && (
-            <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 200, opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 z-10">
-              <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Pages · {pages.length}</span>
-                <button onClick={() => insertBlankPage(pages.length - 1)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500" title="Add blank page"><FilePlus className="h-3.5 w-3.5" /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                {pages.map((p, i) => (
-                  <div key={p.id} onClick={(e) => handlePageClick(i, e)} className={cn("group relative rounded-md border p-1.5 cursor-pointer flex gap-2 items-center", current === i ? "border-[#DC2626] bg-red-50/60 dark:bg-red-900/20" : "border-transparent hover:bg-gray-50 dark:hover:bg-gray-800")}>
-                    <div className="w-11 aspect-[3/4] bg-white border border-gray-200 dark:border-gray-700 overflow-hidden rounded shrink-0 flex items-center justify-center" style={{ transform: `rotate(${p.rotation}deg)` }}>
-                      {thumbs[p.originalIndex] ? <img src={thumbs[p.originalIndex]} alt={`Page ${i + 1}`} className="w-full h-full object-contain pointer-events-none" /> : <div className="w-full h-full animate-pulse bg-gray-100 dark:bg-gray-800" />}
-                    </div>
-                    <div className="flex-1 min-w-0 flex items-center justify-between">
-                      <span className={cn("text-xs font-medium", current === i ? "text-[#DC2626]" : "text-gray-600 dark:text-gray-300")}>{i + 1}</span>
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={(e: ReactMouseEvent) => { e.stopPropagation(); duplicatePage(i); }} className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700" title="Duplicate"><Copy className="h-3 w-3" /></button>
-                        <button onClick={(e: ReactMouseEvent) => { e.stopPropagation(); rotatePage(i, 90); }} className="p-1 rounded hover:bg-white dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700" title="Rotate"><RotateCw className="h-3 w-3" /></button>
-                        <button onClick={(e: ReactMouseEvent) => { e.stopPropagation(); deletePage(i); }} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600" title="Delete"><Trash2 className="h-3 w-3" /></button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                <button onClick={() => insertBlankPage(pages.length - 1)} className="w-full mt-1 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 dark:border-gray-700 py-2 text-xs font-medium text-gray-500 hover:border-[#DC2626] hover:text-[#DC2626] transition-colors"><Plus className="h-3.5 w-3.5" /> Add page</button>
-              </div>
-            </motion.aside>
-          )}
-        </AnimatePresence>
-        <button onClick={() => setShowLeftSidebar((s) => !s)} className="absolute top-1/2 -translate-y-1/2 z-30 bg-[#DC2626] hover:bg-[#B91C1C] rounded-r-lg py-3 px-1.5 text-white shadow-md" style={{ left: showLeftSidebar ? 200 : 0 }}>
-          {showLeftSidebar ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        </button>
-
-        {/* CENTER */}
-        <main className="flex-1 relative overflow-hidden flex flex-col bg-[#EDEEF1] dark:bg-gray-950">
-          {phase === "reading" || phase === "rendering" ? (
-            <div className="m-auto flex flex-col items-center gap-3 text-gray-500"><Loader2 className="h-7 w-7 animate-spin text-[#DC2626]" /><span className="text-sm font-medium">Rendering…</span></div>
-          ) : (
-            <PreviewCanvas pdf={pdf} pages={pages} zoom={zoom} fitMode={fitMode} current={current} onCurrentChange={setCurrent} phase="ready"
-              onToggleSelect={() => {}} selectionMode={false} elements={elements} activeTool={activeTool}
-              selectedIds={selectedIds} onSetSelectedIds={setSelectedIds} onAddElement={addElement}
-              onAddElementKeepTool={addElementKeepTool} onUpdateElement={updateElement}
-              onUpdateElements={updateElements} onDuplicateElements={duplicateElements}
-              onReplaceElements={replaceElements} panStateRef={panStateRef}
-              textPreviewFonts={textPreviewFonts} drawStroke={drawStroke} eraserSize={eraserSize}
-              highlightSettings={highlightSettings} shapeDefaults={shapeDefaults}
-            />
-          )}
-          {/* BOTTOM BAR */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[#1F2937]/95 text-white px-2.5 py-1.5 rounded-lg shadow-lg flex items-center gap-2 z-30 backdrop-blur-sm text-xs">
-            <button onClick={() => { const n = Math.max(0, current - 1); setCurrent(n); document.getElementById(`pdf-page-${n}`)?.scrollIntoView({ behavior: "smooth" }); }} disabled={current === 0} className="p-1 rounded hover:bg-white/20 disabled:opacity-30"><ChevronLeft className="h-3.5 w-3.5" /></button>
-            <span className="font-medium px-1 tabular-nums">{current + 1} / {pages.length}</span>
-            <button onClick={() => { const n = Math.min(pages.length - 1, current + 1); setCurrent(n); document.getElementById(`pdf-page-${n}`)?.scrollIntoView({ behavior: "smooth" }); }} disabled={current === pages.length - 1} className="p-1 rounded hover:bg-white/20 disabled:opacity-30"><ChevronRight className="h-3.5 w-3.5" /></button>
-            <div className="w-px h-4 bg-white/20" />
-            <button onClick={() => { setFitMode("custom"); setZoom((z) => Math.max(0.25, +(z - 0.05).toFixed(2))); }} className="p-1 rounded hover:bg-white/20" title="Zoom out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12" /></svg></button>
-            <span className="font-medium w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-            <button onClick={() => { setFitMode("custom"); setZoom((z) => Math.min(4, +(z + 0.05).toFixed(2))); }} className="p-1 rounded hover:bg-white/20" title="Zoom in"><Plus className="h-3.5 w-3.5" /></button>
-            <div className="w-px h-4 bg-white/20" />
-            <button onClick={() => setFitMode("width")} className={cn("p-1 rounded hover:bg-white/20", fitMode === "width" && "bg-white/25")} title="Fit width"><ArrowLeftRight className="h-3.5 w-3.5" /></button>
-            <button onClick={() => setFitMode("page")} className={cn("p-1 rounded hover:bg-white/20", fitMode === "page" && "bg-white/25")} title="Fit page"><Maximize2 className="h-3.5 w-3.5" /></button>
+      {imagePickerState ===
+        "error" &&
+        imagePickerError && (
+          <div className="fixed bottom-5 right-5 z-[90] rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-600 shadow-xl dark:border-red-900 dark:bg-slate-900">
+            {
+              imagePickerError
+            }
           </div>
-        </main>
-      </div>
+        )}
 
       {signatureOpen && (
-        <SignatureModal savedSignatures={savedSignatures} onInsert={handleSignatureInsert}
-          onCancel={() => { setSignatureOpen(false); setActiveTool("select"); }}
-          onDeleteSaved={(id: string) => { deleteSavedSignature(id); setSavedSignatures(getSavedSignatures()); }}
-        />
-      )}
-    </div>
-  );
-}
-
-function ToolBtn({ icon, label, active, disabled, onClick }: { icon: React.ReactNode; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} disabled={disabled} title={label} aria-label={label} aria-pressed={active}
-      className={cn("flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium shrink-0 transition-colors", active ? "bg-red-50 text-[#DC2626] dark:bg-red-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800", disabled && "opacity-35 pointer-events-none")}>
-      <span className="w-4 h-4 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4">{icon}</span>
-      <span className="hidden md:inline">{label}</span>
-    </button>
-  );
-}
-function Divider() { return <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />; }
-
-function TopPropertyToolbar({
-  activeTool, selectedElements, singleSelected, drawStroke, setDrawStroke,
-  eraserSize, setEraserSize, highlightSettings, setHighlightSettings,
-  shapeDefaults, setShapeDefaults, recentColors, pushRecentColor,
-  onUpdateElement, onUpdateElements, onDeleteElements, onDuplicateElements,
-  onBringForward, onSendBackward, onBringToFront, onSendToBack,
-  textPreviewFonts, onSetPreviewFont, onImageReplace,
-}: {
-  activeTool: Tool;
-  selectedElements: AnyElement[];
-  singleSelected: AnyElement | null;
-  drawStroke: { color: string; width: number };
-  setDrawStroke: (fn: (s: { color: string; width: number }) => { color: string; width: number }) => void;
-  eraserSize: number;
-  setEraserSize: (n: number) => void;
-  highlightSettings: { color: string; opacity: number };
-  setHighlightSettings: (fn: (s: { color: string; opacity: number }) => { color: string; opacity: number }) => void;
-  shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
-  setShapeDefaults: (fn: (s: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" }) => { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" }) => void;
-  recentColors: string[];
-  pushRecentColor: (c: string) => void;
-  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
-  onUpdateElements: (patch: Partial<AnyElement>) => void;
-  onDeleteElements: () => void;
-  onDuplicateElements: () => void;
-  onBringForward: () => void;
-  onSendBackward: () => void;
-  onBringToFront: () => void;
-  onSendToBack: () => void;
-  textPreviewFonts: Record<string, string>;
-  onSetPreviewFont: (id: string, family: string) => void;
-  onImageReplace: () => void;
-}) {
-  const BRUSH_PRESETS = [1, 2, 4, 8, 12, 20];
-  const QUICK_COLORS = ["#000000", "#DC2626", "#2563EB", "#16A34A", "#EAB308", "#9333EA", "#EA580C"];
-  const ERASER_PRESETS = [5, 10, 15, 20, 30, 40, 60];
-  const HIGHLIGHT_COLORS = [
-    { label: "Yellow", value: "#FDE047" }, { label: "Green", value: "#86EFAC" },
-    { label: "Blue", value: "#93C5FD" }, { label: "Pink", value: "#F9A8D4" },
-    { label: "Orange", value: "#FDBA74" }, { label: "Purple", value: "#D8B4FE" },
-  ];
-  const HIGHLIGHT_OPACITIES = [0.2, 0.3, 0.4, 0.5, 0.6];
-  const filledShapeTypes = ["rect", "ellipse", "triangle", "star", "rounded-rect", "speech"];
-
-  const hasSelection = selectedElements.length > 0;
-  const showDrawRow = activeTool === "draw" && !hasSelection;
-  const showEraserRow = activeTool === "eraser" && !hasSelection;
-  const showHighlightRow = activeTool === "highlight" && !hasSelection;
-  const showShapeCreateRow = activeTool.startsWith("shape-") && !hasSelection;
-
-  if (!showDrawRow && !showEraserRow && !showHighlightRow && !showShapeCreateRow && !hasSelection) return null;
-
-  const wrap = "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-x-auto z-20";
-
-  function SwatchRow({ colors, value, onPick }: { colors: string[]; value: string; onPick: (c: string) => void }) {
-    return (
-      <div className="flex items-center gap-1 shrink-0">
-        {colors.map((c) => (
-          <button key={c} onClick={() => onPick(c)} title={c}
-            className={cn("w-5 h-5 rounded-full border-2 shrink-0", value === c ? "border-[#DC2626]" : "border-gray-200 dark:border-gray-700")}
-            style={{ background: c }} />
-        ))}
-      </div>
-    );
-  }
-
-  function SizeDots({ sizes, value, onPick, max = 20 }: { sizes: number[]; value: number; onPick: (n: number) => void; max?: number }) {
-    return (
-      <div className="flex items-center gap-1 shrink-0">
-        {sizes.map((sz) => (
-          <button key={sz} onClick={() => onPick(sz)} title={`${sz}px`}
-            className={cn("w-7 h-7 rounded-md flex items-center justify-center border shrink-0", value === sz ? "border-[#DC2626] bg-red-50 dark:bg-red-900/30" : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800")}>
-            <span className="rounded-full bg-current" style={{ width: Math.min(sz, max), height: Math.min(sz, max) }} />
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  function LayerButtons({ multi }: { multi: boolean }) {
-    return (
-      <div className="flex items-center gap-1 shrink-0 pl-2 ml-1 border-l border-gray-200 dark:border-gray-700">
-        <button onClick={onSendBackward} title="Send backward" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ArrowDown className="w-3.5 h-3.5" /></button>
-        <button onClick={onBringForward} title="Bring forward" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ArrowUp className="w-3.5 h-3.5" /></button>
-        <button onClick={onSendToBack} title="Send to back" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ChevronsDown className="w-3.5 h-3.5" /></button>
-        <button onClick={onBringToFront} title="Bring to front" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><ChevronsUp className="w-3.5 h-3.5" /></button>
-        <button onClick={onDuplicateElements} title="Duplicate" className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><Copy className="w-3.5 h-3.5" /></button>
-        <button onClick={onDeleteElements} title="Delete" className="p-1.5 rounded-md hover:bg-red-50 text-gray-500 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
-        {multi && <span className="text-xs text-gray-400 pl-1">{selectedElements.length} selected</span>}
-      </div>
-    );
-  }
-
-  // Creation-mode rows (no selection)
-  if (showDrawRow) {
-    return (
-      <div className={wrap}>
-        <input type="color" value={drawStroke.color} onChange={(e) => { setDrawStroke((s) => ({ ...s, color: e.target.value })); pushRecentColor(e.target.value); }} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
-        <SwatchRow colors={QUICK_COLORS} value={drawStroke.color} onPick={(c) => setDrawStroke((s) => ({ ...s, color: c }))} />
-        {recentColors.length > 0 && <SwatchRow colors={recentColors.slice(0, 4)} value={drawStroke.color} onPick={(c) => setDrawStroke((s) => ({ ...s, color: c }))} />}
-        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-        <SizeDots sizes={BRUSH_PRESETS} value={drawStroke.width} onPick={(n) => setDrawStroke((s) => ({ ...s, width: n }))} />
-        <input type="range" min={1} max={30} value={drawStroke.width} onChange={(e) => setDrawStroke((s) => ({ ...s, width: Number(e.target.value) }))} className="w-16 accent-[#DC2626] shrink-0" />
-        <span className="text-xs text-gray-400 w-8 shrink-0 tabular-nums">{drawStroke.width}px</span>
-      </div>
-    );
-  }
-  if (showEraserRow) {
-    return (
-      <div className={wrap}>
-        <SizeDots sizes={ERASER_PRESETS} value={eraserSize} onPick={setEraserSize} max={18} />
-        <input type="range" min={5} max={60} value={eraserSize} onChange={(e) => setEraserSize(Number(e.target.value))} className="w-16 accent-[#DC2626] shrink-0" />
-        <span className="text-xs text-gray-400 w-8 shrink-0 tabular-nums">{eraserSize}px</span>
-      </div>
-    );
-  }
-  if (showHighlightRow) {
-    return (
-      <div className={wrap}>
-        {HIGHLIGHT_COLORS.map((c) => (
-          <button key={c.value} onClick={() => setHighlightSettings((s) => ({ ...s, color: c.value }))} title={c.label}
-            className={cn("w-6 h-6 rounded-full border-2 shrink-0", highlightSettings.color === c.value ? "border-[#DC2626]" : "border-gray-200 dark:border-gray-700")}
-            style={{ background: c.value }} />
-        ))}
-        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-        <select value={highlightSettings.opacity} onChange={(e) => setHighlightSettings((s) => ({ ...s, opacity: Number(e.target.value) }))}
-          className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0">
-          {HIGHLIGHT_OPACITIES.map((o) => <option key={o} value={o}>{Math.round(o * 100)}%</option>)}
-        </select>
-      </div>
-    );
-  }
-  if (showShapeCreateRow) {
-    return (
-      <div className={wrap}>
-        <SizeDots sizes={[1, 2, 4, 8, 12, 20]} value={shapeDefaults.strokeWidth} onPick={(n) => setShapeDefaults((s) => ({ ...s, strokeWidth: n }))} />
-        <input type="color" value={shapeDefaults.stroke} onChange={(e) => setShapeDefaults((s) => ({ ...s, stroke: e.target.value }))} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" title="Stroke color" />
-        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-        <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300 shrink-0">
-          <input type="checkbox" checked={shapeDefaults.fill === null} onChange={(e) => setShapeDefaults((s) => ({ ...s, fill: e.target.checked ? null : "#ffffff" }))} className="accent-[#DC2626]" /> No fill
-        </label>
-        {shapeDefaults.fill !== null && <input type="color" value={shapeDefaults.fill} onChange={(e) => setShapeDefaults((s) => ({ ...s, fill: e.target.value }))} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" title="Fill color" />}
-        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-        <select value={shapeDefaults.dash} onChange={(e) => setShapeDefaults((s) => ({ ...s, dash: e.target.value as any }))} className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0">
-          <option value="solid">Solid</option>
-          <option value="dashed">Dashed</option>
-          <option value="dotted">Dotted</option>
-        </select>
-      </div>
-    );
-  }
-
-  // Selection-mode row
-  if (!singleSelected && selectedElements.length > 1) {
-    return (
-      <div className={wrap}>
-        <input type="range" min={0.1} max={1} step={0.05} onChange={(e) => onUpdateElements({ opacity: Number(e.target.value) })} className="w-16 accent-[#DC2626] shrink-0" title="Opacity" />
-        <LayerButtons multi />
-      </div>
-    );
-  }
-  if (singleSelected) {
-    const el = singleSelected;
-    const isShape = ["rect", "ellipse", "line", "arrow", "triangle", "star", "rounded-rect", "speech"].includes(el.type);
-    return (
-      <div className={wrap}>
-        {el.type === "text" && (
-          <>
-            <select value={textPreviewFonts[el.id] || (el as TextElement).font} onChange={(e) => onSetPreviewFont(el.id, e.target.value)} className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0 max-w-[120px]">
-              {FONT_PREVIEW_CHOICES.map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
-            <input type="number" min={6} max={96} value={(el as TextElement).fontSize} onChange={(e) => onUpdateElement(el.id, { fontSize: Number(e.target.value) })} className="w-12 h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center shrink-0" />
-            <button onClick={() => onUpdateElement(el.id, { bold: !(el as TextElement).bold })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).bold ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><Bold className="w-3.5 h-3.5" /></button>
-            <button onClick={() => onUpdateElement(el.id, { italic: !(el as TextElement).italic })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).italic ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><Italic className="w-3.5 h-3.5" /></button>
-            <button onClick={() => onUpdateElement(el.id, { underline: !(el as TextElement).underline })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).underline ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><UnderlineIcon className="w-3.5 h-3.5" /></button>
-            {[["left", AlignLeft], ["center", AlignCenter], ["right", AlignRight]].map(([a, Icon]: any) => (
-              <button key={a} onClick={() => onUpdateElement(el.id, { align: a })} className={cn("w-7 h-7 rounded-md border shrink-0 flex items-center justify-center", (el as TextElement).align === a ? "border-[#DC2626] text-[#DC2626] bg-red-50" : "border-gray-200 dark:border-gray-700 text-gray-500")}><Icon className="w-3.5 h-3.5" /></button>
-            ))}
-            <input type="color" value={(el as TextElement).color} onChange={(e) => onUpdateElement(el.id, { color: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
-          </>
-        )}
-        {el.type === "image" && (
-          <button onClick={onImageReplace} className="h-7 px-2 text-xs rounded-md border border-gray-300 dark:border-gray-600 shrink-0">Replace image</button>
-        )}
-        {(el.type === "draw" || isShape) && (
-          <>
-            <input type="number" min={1} max={30} value={(el as DrawElement | ShapeElement).strokeWidth} onChange={(e) => onUpdateElement(el.id, { strokeWidth: Number(e.target.value) })} className="w-12 h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 text-xs text-center shrink-0" title="Stroke width" />
-            <input type="color" value={(el as DrawElement | ShapeElement).stroke} onChange={(e) => onUpdateElement(el.id, { stroke: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" title="Stroke color" />
-            {isShape && filledShapeTypes.includes(el.type) && (
-              <>
-                <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300 shrink-0">
-                  <input type="checkbox" checked={(el as ShapeElement).fill === null} onChange={(e) => onUpdateElement(el.id, { fill: e.target.checked ? null : "#ffffff" })} className="accent-[#DC2626]" /> No fill
-                </label>
-                {(el as ShapeElement).fill !== null && <input type="color" value={(el as ShapeElement).fill ?? "#ffffff"} onChange={(e) => onUpdateElement(el.id, { fill: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />}
-                <select value={(el as any).dash ?? "solid"} onChange={(e) => onUpdateElement(el.id, { dash: e.target.value } as any)} className="h-7 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 shrink-0">
-                  <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
-                </select>
-              </>
-            )}
-          </>
-        )}
-        {["highlight", "underline", "strikeout", "squiggly"].includes(el.type) && (
-          <input type="color" value={(el as HighlightElement).color} onChange={(e) => onUpdateElement(el.id, { color: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
-        )}
-        {el.type === "sticky" && (
-          <input type="color" value={(el as StickyElement).color} onChange={(e) => onUpdateElement(el.id, { color: e.target.value })} className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0 shrink-0" />
-        )}
-        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 shrink-0" />
-        <input type="range" min={0.1} max={1} step={0.05} value={el.opacity} onChange={(e) => onUpdateElement(el.id, { opacity: Number(e.target.value) })} className="w-14 accent-[#DC2626] shrink-0" title="Opacity" />
-        {ROTATABLE_TYPES.has(el.type) && (
-          <input type="range" min={0} max={359} value={el.rotation} onChange={(e) => onUpdateElement(el.id, { rotation: Number(e.target.value) })} className="w-14 accent-[#DC2626] shrink-0" title="Rotation" />
-        )}
-        <LayerButtons multi={false} />
-      </div>
-    );
-  }
-  return null;
-}
-
-/* =========================================================  PREVIEW CANVAS  ========================================================= */
-function PreviewCanvas(props: {
-  pdf: PdfDoc | null; pages: EditorPage[]; zoom: number; fitMode: "width" | "page" | "custom";
-  current: number; onCurrentChange: (n: number) => void; phase: Phase;
-  onToggleSelect: (i: number) => void; selectionMode: boolean; elements: AnyElement[];
-  activeTool: Tool; selectedIds: Set<string>; onSetSelectedIds: (ids: Set<string>) => void;
-  onAddElement: (el: AnyElement) => void; onAddElementKeepTool: (el: AnyElement) => void;
-  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
-  onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
-  onDuplicateElements: (ids: Set<string>) => void;
-  onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
-  panStateRef: React.MutableRefObject<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; el: HTMLElement } | null>;
-  textPreviewFonts: Record<string, string>; drawStroke: { color: string; width: number }; eraserSize: number;
-  highlightSettings: { color: string; opacity: number }; shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
-  useLayoutEffect(() => { const el = containerRef.current; if (!el) return; const ro = new ResizeObserver(() => setContainerSize({ w: el.clientWidth, h: el.clientHeight })); ro.observe(el); setContainerSize({ w: el.clientWidth, h: el.clientHeight }); return () => ro.disconnect(); }, []);
-  const scale = useMemo(() => { if (!props.pdf) return 1.5; if (props.fitMode === "custom") return 1.5 * props.zoom; return props.fitMode === "width" ? 1.5 : 1.2; }, [props.pdf, props.fitMode, props.zoom]);
-  const [visible, setVisible] = useState<Set<number>>(new Set([0]));
-  
-  useEffect(() => {
-    const el = containerRef.current; if (!el) return;
-    const items = Array.from(el.querySelectorAll<HTMLElement>("[data-page-index]"));
-    const io = new IntersectionObserver((entries) => {
-      setVisible((prev) => { const next = new Set(prev); entries.forEach((en) => { const idx = parseInt((en.target as Element).getAttribute("data-page-index") || "-1", 10); if (en.isIntersecting) next.add(idx); else next.delete(idx); }); return next; });
-      const top = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      if (top) { const idx = parseInt((top.target as Element).getAttribute("data-page-index") || "-1", 10); if (idx >= 0) props.onCurrentChange(idx); }
-    }, { root: el, rootMargin: "50% 0px", threshold: 0 });
-    items.forEach((it) => io.observe(it)); return () => io.disconnect();
-  }, [props.pages.length, props.onCurrentChange]);
-
-  function onContainerPointerDown(e: ReactPointerEvent) {
-    if (props.activeTool !== "hand") return;
-    const el = containerRef.current; if (!el) return;
-    props.panStateRef.current = { startX: e.clientX, startY: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop, el };
-    const onMove = (ev: PointerEvent) => { const st = props.panStateRef.current; if (!st) return; st.el.scrollLeft = st.scrollLeft - (ev.clientX - st.startX); st.el.scrollTop = st.scrollTop - (ev.clientY - st.startY); };
-    const onUp = () => { props.panStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
-  }
-
-  return (
-    <div ref={containerRef} onPointerDown={onContainerPointerDown} className="w-full h-full overflow-auto flex flex-col items-center py-6 px-2 sm:px-4" style={{ cursor: props.activeTool === "hand" ? "grab" : undefined }}>
-      <div className="flex flex-col items-center gap-8 pb-32">
-        {props.pages.map((p, i) => (
-          <PagePane key={p.id} index={i} page={p} pdf={props.pdf!} visible={visible.has(i)}
-            containerWidth={containerSize.w} containerHeight={containerSize.h} fitMode={props.fitMode}
-            zoom={props.zoom} baseScale={scale} active={props.current === i}
-            selectionMode={props.selectionMode} onToggleSelect={() => props.onToggleSelect(i)}
-            elements={props.elements.filter((e) => e.pageId === p.id)} activeTool={props.activeTool}
-            selectedIds={props.selectedIds} onSetSelectedIds={props.onSetSelectedIds}
-            onAddElement={props.onAddElement} onAddElementKeepTool={props.onAddElementKeepTool}
-            onUpdateElement={props.onUpdateElement} onUpdateElements={props.onUpdateElements}
-            onDuplicateElements={props.onDuplicateElements} onReplaceElements={props.onReplaceElements}
-            textPreviewFonts={props.textPreviewFonts} drawStroke={props.drawStroke} eraserSize={props.eraserSize}
-            highlightSettings={props.highlightSettings} shapeDefaults={props.shapeDefaults}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PagePane(props: {
-  index: number; page: EditorPage; pdf: PdfDoc; visible: boolean;
-  containerWidth: number; containerHeight: number; fitMode: "width" | "page" | "custom";
-  zoom: number; baseScale: number; active: boolean; selectionMode: boolean;
-  onToggleSelect: () => void; elements: AnyElement[]; activeTool: Tool;
-  selectedIds: Set<string>; onSetSelectedIds: (ids: Set<string>) => void;
-  onAddElement: (el: AnyElement) => void; onAddElementKeepTool: (el: AnyElement) => void;
-  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
-  onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
-  onDuplicateElements: (ids: Set<string>) => void;
-  onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
-  textPreviewFonts: Record<string, string>; drawStroke: { color: string; width: number }; eraserSize: number;
-  highlightSettings: { color: string; opacity: number }; shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const [rendered, setRendered] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    if (props.page.isBlank) { setDims({ w: 595, h: 842 }); setRendered(true); return; }
-    (async () => { try { const p = await props.pdf.getPage(props.page.originalIndex + 1); const vp = p.getViewport({ scale: 1, rotation: props.page.rotation }); if (!cancelled) setDims({ w: vp.width, h: vp.height }); } catch { /**/ } })();
-    return () => { cancelled = true; };
-  }, [props.pdf, props.page.originalIndex, props.page.rotation, props.page.isBlank]);
-
-  const scale = useMemo(() => {
-    if (!dims) return 1;
-    if (props.fitMode === "custom") return props.baseScale;
-    const pad = 16;
-    if (props.fitMode === "width") return Math.max(320, props.containerWidth - pad) / dims.w;
-    return Math.min(Math.max(320, props.containerWidth - pad) / dims.w, Math.max(320, props.containerHeight - pad) / dims.h);
-  }, [dims, props.fitMode, props.baseScale, props.containerWidth, props.containerHeight]);
-
-  const displayW = dims ? dims.w * scale : 600, displayH = dims ? dims.h * scale : 800;
-
-  useEffect(() => {
-    if (!props.visible || !dims || props.page.isBlank) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const page = await props.pdf.getPage(props.page.originalIndex + 1);
-        const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-        const vp = page.getViewport({ scale: Math.max(scale, 1) * dpr, rotation: props.page.rotation });
-        const canvas = canvasRef.current; if (!canvas) return;
-        canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
-        canvas.style.width = `${Math.ceil(displayW)}px`; canvas.style.height = `${Math.ceil(displayH)}px`;
-        const ctx = canvas.getContext("2d", { alpha: false }); if (!ctx || cancelled) return;
-        await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
-        if (!cancelled) setRendered(true);
-      } catch { /**/ }
-    })();
-    return () => { cancelled = true; };
-  }, [props.visible, dims, scale, props.pdf, props.page.originalIndex, props.page.rotation, displayW, displayH, props.page.isBlank]);
-
-  return (
-    <div id={`pdf-page-${props.index}`} data-page-index={props.index}
-      className={cn("group relative overflow-hidden bg-white shadow-[0_1px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_1px_10px_rgba(0,0,0,0.5)] mb-8 border border-gray-200 dark:border-gray-800", props.selectionMode && "cursor-pointer")}
-      style={{ width: displayW, height: displayH }} onClick={props.selectionMode ? props.onToggleSelect : undefined}>
-      <canvas ref={canvasRef} className="block h-full w-full bg-white" />
-      {!rendered && !props.page.isBlank && <div className="absolute inset-0 grid animate-pulse place-items-center bg-gray-50 text-xs text-gray-400">Rendering…</div>}
-      {props.page.rotation === 0 && dims && (
-        <AnnotationLayer pageId={props.page.id} scale={scale} elements={props.elements} activeTool={props.activeTool}
-          selectedIds={props.selectedIds} onSetSelectedIds={props.onSetSelectedIds}
-          onAddElement={props.onAddElement} onAddElementKeepTool={props.onAddElementKeepTool}
-          onUpdateElement={props.onUpdateElement} onUpdateElements={props.onUpdateElements}
-          onDuplicateElements={props.onDuplicateElements} onReplaceElements={props.onReplaceElements}
-          interactive={props.activeTool !== "hand"} textPreviewFonts={props.textPreviewFonts}
-          drawStroke={props.drawStroke} eraserSize={props.eraserSize}
-          highlightSettings={props.highlightSettings} shapeDefaults={props.shapeDefaults}
-        />
-      )}
-    </div>
-  );
-}
-
-/* =========================================================  ANNOTATION LAYER  ========================================================= */
-function AnnotationLayer(props: {
-  pageId: string; scale: number; elements: AnyElement[]; activeTool: Tool;
-  selectedIds: Set<string>; onSetSelectedIds: (ids: Set<string>) => void;
-  onAddElement: (el: AnyElement) => void; onAddElementKeepTool: (el: AnyElement) => void;
-  onUpdateElement: (id: string, patch: Partial<AnyElement>) => void;
-  onUpdateElements: (ids: Set<string>, patchFn: (e: AnyElement) => Partial<AnyElement>) => void;
-  onDuplicateElements: (ids: Set<string>) => void;
-  onReplaceElements: (toRemove: string[], toAdd: AnyElement[]) => void;
-  interactive: boolean; textPreviewFonts: Record<string, string>;
-  drawStroke: { color: string; width: number }; eraserSize: number;
-  highlightSettings: { color: string; opacity: number }; shapeDefaults: { stroke: string; strokeWidth: number; fill: string | null; dash: "solid" | "dashed" | "dotted" };
-}) {
-  const layerRef = useRef<HTMLDivElement | null>(null);
-  const elementsRef = useRef(props.elements);
-  
-  useEffect(() => { elementsRef.current = props.elements; }, [props.elements]);
-
-  const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [drawPoints, setDrawPoints] = useState<{ x: number; y: number }[] | null>(null);
-  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
-  const dragStateRef = useRef<{ startPt: { x: number; y: number } } | null>(null);
-  const moveStateRef = useRef<{ ids: string[]; offsets: Record<string, { x: number; y: number }> } | null>(null);
-  const resizeStateRef = useRef<{ id: string; startW: number; startH: number } | null>(null);
-  const rotateStateRef = useRef<{ id: string; centerX: number; centerY: number; startAngle: number; startRotation: number } | null>(null);
-
-  const toPt = useCallback((clientX: number, clientY: number) => {
-    const rect = layerRef.current!.getBoundingClientRect();
-    return { x: (clientX - rect.left) / props.scale, y: (clientY - rect.top) / props.scale };
-  }, [props.scale]);
-
-  const nonCreationTools: Tool[] = ["select", "hand", "image", "signature", "eraser"];
-  const isCreationTool = props.interactive && !nonCreationTools.includes(props.activeTool);
-  const isShapeTool = props.activeTool.startsWith("shape-");
-  const isFieldTool = props.activeTool.startsWith("field-");
-
-  function onLayerPointerDown(e: ReactPointerEvent) {
-    if (!props.interactive) return;
-
-    // ERASER TOOL
-    if (props.activeTool === "eraser") {
-      e.preventDefault();
-      const pt = toPt(e.clientX, e.clientY);
-      setEraserPos(pt);
-      const drawEls = props.elements.filter((el) => el.type === "draw") as DrawElement[];
-      const { toRemove, toAdd } = eraseFromDrawElements(pt, props.eraserSize, drawEls);
-      if (toRemove.length > 0) props.onReplaceElements(toRemove, toAdd);
-      const onMove = (ev: PointerEvent) => {
-        const p = toPt(ev.clientX, ev.clientY); setEraserPos(p);
-        const curr = elementsRef.current.filter((el) => el.type === "draw") as DrawElement[];
-        const res = eraseFromDrawElements(p, props.eraserSize, curr);
-        if (res.toRemove.length > 0) props.onReplaceElements(res.toRemove, res.toAdd);
-      };
-      const onUp = () => { setEraserPos(null); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-      window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
-      return;
-    }
-
-    // SELECT / MARQUEE
-    if (!isCreationTool) {
-      if (e.target === layerRef.current) {
-        if (e.shiftKey || e.metaKey || e.ctrlKey) return;
-        props.onSetSelectedIds(new Set());
-        const start = toPt(e.clientX, e.clientY);
-        setMarquee({ x: start.x, y: start.y, w: 0, h: 0 });
-        const onMove = (ev: PointerEvent) => { const p = toPt(ev.clientX, ev.clientY); setMarquee({ x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) }); };
-        const onUp = (ev: PointerEvent) => {
-          window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp);
-          const p = toPt(ev.clientX, ev.clientY);
-          const r = { x1: Math.min(start.x, p.x), y1: Math.min(start.y, p.y), x2: Math.max(start.x, p.x), y2: Math.max(start.y, p.y) };
-          if (Math.abs(r.x2 - r.x1) > 3 || Math.abs(r.y2 - r.y1) > 3) props.onSetSelectedIds(new Set(props.elements.filter((el) => { const b = { x1: el.x, y1: el.y, x2: el.x + el.width, y2: el.y + el.height }; return r.x1 < b.x2 && r.x2 > b.x1 && r.y1 < b.y2 && r.y2 > b.y1; }).map((el) => el.id)));
-          setMarquee(null);
-        };
-        window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
-      }
-      return;
-    }
-
-    const pt = toPt(e.clientX, e.clientY);
-
-    // Single-click tools
-    if (props.activeTool === "text") { props.onAddElementKeepTool({ id: makeId("txt"), pageId: props.pageId, type: "text", x: pt.x, y: pt.y, width: 180, height: 28, opacity: 1, rotation: 0, text: "Click to edit text", font: "Helvetica", fontSize: 14, bold: false, italic: false, underline: false, color: "#111827", align: "left", letterSpacing: 0, lineSpacing: 1.25 } as TextElement); return; }
-    if (props.activeTool === "sticky") { props.onAddElement({ id: makeId("sticky"), pageId: props.pageId, type: "sticky", x: pt.x, y: pt.y, width: 140, height: 100, opacity: 1, rotation: 0, color: "#FEF08A", note: "" } as StickyElement); return; }
-    if (isFieldTool) {
-      const base = { id: makeId(props.activeTool), pageId: props.pageId, opacity: 1, rotation: 0, x: pt.x, y: pt.y } as const;
-      let el: AnyElement | null = null;
-      if (props.activeTool === "field-text") el = { ...base, type: "field-text", width: 180, height: 26, name: "text_field", value: "", placeholder: "Enter text", required: false } as FieldTextElement;
-      else if (props.activeTool === "field-checkbox") el = { ...base, type: "field-checkbox", width: 18, height: 18, name: "checkbox", checked: false, required: false } as FieldCheckboxElement;
-      else if (props.activeTool === "field-radio") el = { ...base, type: "field-radio", width: 18, height: 18, groupName: "radio_group", value: "option_1", checked: false, required: false } as FieldRadioElement;
-      else if (props.activeTool === "field-dropdown") el = { ...base, type: "field-dropdown", width: 160, height: 26, name: "dropdown", options: ["Option 1", "Option 2"], value: "Option 1", required: false } as FieldDropdownElement;
-      if (el) props.onAddElement(el); return;
-    }
-
-    // Drag-based tools
-    dragStateRef.current = { startPt: pt };
-    if (props.activeTool === "draw") setDrawPoints([pt]);
-    else setDraft({ x: pt.x, y: pt.y, w: 0, h: 0 });
-
-    const onMove = (ev: PointerEvent) => {
-      const p = toPt(ev.clientX, ev.clientY);
-      if (props.activeTool === "draw") setDrawPoints((pts) => pts ? [...pts, p] : [p]);
-      else { const s = dragStateRef.current!.startPt; setDraft({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) }); }
-    };
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp);
-      const p = toPt(ev.clientX, ev.clientY);
-      const start = dragStateRef.current?.startPt ?? p;
-      dragStateRef.current = null;
-
-      if (props.activeTool === "draw") {
-        setDrawPoints((pts) => {
-          if (pts && pts.length > 1) {
-            const xs = pts.map((pp) => pp.x), ys = pts.map((pp) => pp.y);
-            const minX = Math.min(...xs), minY = Math.min(...ys), maxX = Math.max(...xs), maxY = Math.max(...ys);
-            props.onAddElementKeepTool({ id: makeId("draw"), pageId: props.pageId, type: "draw", x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY), opacity: 1, rotation: 0, stroke: props.drawStroke.color, strokeWidth: props.drawStroke.width, points: pts.map((pp) => ({ x: pp.x - minX, y: pp.y - minY })) } as DrawElement);
+        <SignatureModal
+          savedSignatures={
+            savedSignatures
           }
-          return null;
-        });
-        return;
-      }
+          onInsert={
+            handleSignatureInsert
+          }
+          onCancel={() =>
+            setSignatureOpen(
+              false,
+            )
+          }
+          onDeleteSaved={(
+            id,
+          ) => {
+            deleteSavedSignature(
+              id,
+            );
 
-      const x = Math.min(start.x, p.x), y = Math.min(start.y, p.y);
-      const w = Math.max(8, Math.abs(p.x - start.x)), h = Math.max(8, Math.abs(p.y - start.y));
-      setDraft(null);
-
-      if (isShapeTool) {
-        const flipDiag = (start.x < p.x) !== (start.y < p.y);
-        props.onAddElement({
-          id: makeId("shape"), pageId: props.pageId, type: props.activeTool.replace("shape-", ""),
-          x, y, width: w, height: h, opacity: 1, rotation: 0,
-          stroke: props.shapeDefaults.stroke, strokeWidth: props.shapeDefaults.strokeWidth,
-          fill: props.shapeDefaults.fill, dash: props.shapeDefaults.dash, flipDiag,
-        } as unknown as ShapeElement);
-      } else if (["highlight","underline","strikeout","squiggly"].includes(props.activeTool)) {
-        props.onAddElement({
-          id: makeId("markup"),
-          pageId: props.pageId,
-          type: props.activeTool,
-          x, y, width: w, height: h,
-          opacity: props.activeTool === "highlight" ? props.highlightSettings.opacity : 1,
-          rotation: 0,
-          color: props.activeTool === "highlight" ? props.highlightSettings.color : "#FDE047",
-        } as HighlightElement);
-      } else if (props.activeTool === "whiteout") {
-        props.onAddElementKeepTool({ id: makeId("wo"), pageId: props.pageId, type: "whiteout", x, y, width: w, height: h, opacity: 1, rotation: 0, color: "#ffffff" });
-      }
-    };
-    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
-  }
-
-  function startMove(e: ReactPointerEvent, el: AnyElement) {
-    if (!props.interactive || props.activeTool !== "select") return;
-    e.stopPropagation();
-    let ids = props.selectedIds;
-    if (e.shiftKey || e.metaKey || e.ctrlKey) { const n = new Set(ids); if (n.has(el.id)) n.delete(el.id); else n.add(el.id); props.onSetSelectedIds(n); ids = n; }
-    else if (!ids.has(el.id)) { ids = new Set([el.id]); props.onSetSelectedIds(ids); }
-    if (!ids.has(el.id)) return;
-    if (e.altKey) { props.onDuplicateElements(ids); return; }
-    const pt = toPt(e.clientX, e.clientY);
-    const offsets: Record<string, { x: number; y: number }> = {};
-    for (const id of ids) { const f = props.elements.find((x) => x.id === id); if (f) offsets[id] = { x: pt.x - f.x, y: pt.y - f.y }; }
-    moveStateRef.current = { ids: Array.from(ids), offsets };
-    const onMove = (ev: PointerEvent) => { const p = toPt(ev.clientX, ev.clientY); const st = moveStateRef.current; if (!st) return; props.onUpdateElements(new Set(st.ids), (e2) => ({ x: p.x - st.offsets[e2.id].x, y: p.y - st.offsets[e2.id].y })); };
-    const onUp = () => { moveStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
-  }
-
-  function startResize(e: ReactPointerEvent, el: AnyElement) {
-    e.stopPropagation();
-    resizeStateRef.current = { id: el.id, startW: el.width, startH: el.height };
-    const sc = { x: e.clientX, y: e.clientY };
-    const onMove = (ev: PointerEvent) => { const st = resizeStateRef.current; if (!st) return; props.onUpdateElement(st.id, { width: Math.max(12, st.startW + (ev.clientX - sc.x) / props.scale), height: Math.max(12, st.startH + (ev.clientY - sc.y) / props.scale) }); };
-    const onUp = () => { resizeStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
-  }
-
-  function startRotate(e: ReactPointerEvent, el: AnyElement) {
-    e.stopPropagation();
-    const rect = layerRef.current!.getBoundingClientRect();
-    const cx = rect.left + (el.x + el.width / 2) * props.scale, cy = rect.top + (el.y + el.height / 2) * props.scale;
-    const sa = Math.atan2(e.clientY - cy, e.clientX - cx);
-    rotateStateRef.current = { id: el.id, centerX: cx, centerY: cy, startAngle: sa, startRotation: el.rotation };
-    const onMove = (ev: PointerEvent) => { const st = rotateStateRef.current; if (!st) return; const a = Math.atan2(ev.clientY - st.centerY, ev.clientX - st.centerX); let rot = Math.round(st.startRotation + (a - st.startAngle) * 180 / Math.PI); if (ev.shiftKey) rot = Math.round(rot / 15) * 15; props.onUpdateElement(st.id, { rotation: ((rot % 360) + 360) % 360 }); };
-    const onUp = () => { rotateStateRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
-  }
-
-  const isInteractiveDrawing = props.activeTool === "draw" || props.activeTool === "eraser" || isCreationTool;
-
-  return (
-    <div ref={layerRef} className="absolute inset-0"
-      style={{ cursor: props.activeTool === "eraser" ? "none" : isCreationTool ? "crosshair" : "default", pointerEvents: props.interactive ? "auto" : "none", touchAction: isInteractiveDrawing ? "none" : undefined }}
-      onPointerDown={onLayerPointerDown}>
-
-      {props.elements.map((el) => {
-        const selected = props.selectedIds.has(el.id);
-        const canRotate = selected && props.activeTool === "select" && ROTATABLE_TYPES.has(el.type) && props.selectedIds.size === 1;
-        const s = el as ShapeElement & { flipDiag?: boolean; dash?: "solid" | "dashed" | "dotted" };
-        const sw = el.width * props.scale, sh = el.height * props.scale;
-        
-        const style: CSSProperties = { 
-          position: "absolute", left: el.x * props.scale, top: el.y * props.scale, width: sw, height: sh, 
-          opacity: el.opacity, transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined, 
-          transformOrigin: "center center"
-        };
-
-        let body: React.ReactNode = null;
-        if (el.type === "text") {
-          const t = el as TextElement;
-          body = (<div contentEditable={selected && props.activeTool === "select" && props.selectedIds.size === 1} suppressContentEditableWarning onBlur={(e2) => props.onUpdateElement(el.id, { text: e2.currentTarget.textContent || "" })} style={{ width: "100%", height: "100%", fontFamily: props.textPreviewFonts[el.id] ? fontFamilyStack(props.textPreviewFonts[el.id]) : t.font === "TimesRoman" ? "Times New Roman, serif" : t.font === "Courier" ? "monospace" : "Helvetica, Arial, sans-serif", fontSize: t.fontSize * props.scale, fontWeight: t.bold ? 700 : 400, fontStyle: t.italic ? "italic" : "normal", textDecoration: t.underline ? "underline" : "none", color: t.color, textAlign: t.align, whiteSpace: "pre-wrap", outline: "none", lineHeight: t.lineSpacing, letterSpacing: `${t.letterSpacing * props.scale}px`, cursor: "text" }}>{t.text}</div>);
-        } else if (el.type === "rect") {
-          body = <div style={{ width: "100%", height: "100%", border: `${s.strokeWidth * props.scale}px ${s.dash === "dashed" ? "dashed" : s.dash === "dotted" ? "dotted" : "solid"} ${s.stroke}`, background: s.fill ?? "transparent" }} />;
-        } else if ((el.type as string) === "rounded-rect") {
-          body = <div style={{ width: "100%", height: "100%", borderRadius: 12 * props.scale, border: `${s.strokeWidth * props.scale}px ${s.dash === "dashed" ? "dashed" : s.dash === "dotted" ? "dotted" : "solid"} ${s.stroke}`, background: s.fill ?? "transparent" }} />;
-        } else if (el.type === "ellipse") {
-          body = <div style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${s.strokeWidth * props.scale}px ${s.dash === "dashed" ? "dashed" : s.dash === "dotted" ? "dotted" : "solid"} ${s.stroke}`, background: s.fill ?? "transparent" }} />;
-        } else if (el.type === "line") {
-          const flip = (s as any).flipDiag;
-          body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}><line x1={0} y1={flip ? sh : 0} x2={sw} y2={flip ? 0 : sh} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinecap="round" /></svg>);
-        } else if ((el.type as string) === "arrow") {
-          const aw = Math.max(10, Math.min(sw * 0.25, sh * 0.8));
-          const ah = aw * 0.65;
-          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <line x1={0} y1={sh / 2} x2={sw - aw * 0.8} y2={sh / 2} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinecap="round" />
-            <polygon points={`${sw - aw},${sh / 2 - ah / 2} ${sw},${sh / 2} ${sw - aw},${sh / 2 + ah / 2}`} fill={s.stroke} />
-          </svg>);
-        } else if ((el.type as string) === "triangle") {
-          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <polygon points={`${sw / 2},0 ${sw},${sh} 0,${sh}`} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinejoin="round" />
-          </svg>);
-        } else if ((el.type as string) === "star") {
-          const cx = sw / 2, cy = sh / 2, outerR = Math.min(cx, cy) * 0.98, innerR = outerR * 0.42;
-          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <polygon points={starSvgPoints(cx, cy, outerR, innerR)} fill={s.fill ?? "none"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinejoin="round" />
-          </svg>);
-        } else if ((el.type as string) === "speech") {
-          const r = Math.min(10, sw * 0.05, sh * 0.08);
-          const tailH = sh * 0.22, bubH = sh - tailH;
-          body = (<svg width="100%" height="100%" viewBox={`0 0 ${sw} ${sh}`} style={{ overflow: "visible" }}>
-            <path d={`M ${r},0 L ${sw - r},0 Q ${sw},0 ${sw},${r} L ${sw},${bubH - r} Q ${sw},${bubH} ${sw - r},${bubH} L ${sw * 0.38},${bubH} L ${sw * 0.22},${sh} L ${sw * 0.3},${bubH} L ${r},${bubH} Q 0,${bubH} 0,${bubH - r} L 0,${r} Q 0,0 ${r},0 Z`} fill={s.fill ?? "white"} stroke={s.stroke} strokeWidth={s.strokeWidth * props.scale} strokeDasharray={s.dash === "dashed" ? "8 6" : s.dash === "dotted" ? "2 4" : "none"} strokeLinejoin="round" />
-          </svg>);
-        } else if (el.type === "draw") {
-          const d = el as DrawElement;
-          const pts = d.points.map((p) => `${p.x * props.scale},${p.y * props.scale}`).join(" ");
-          body = (<svg className="absolute inset-0 w-full h-full" style={{ overflow: "visible" }}>
-            <polyline points={pts} fill="none" stroke={d.stroke} strokeWidth={d.strokeWidth * props.scale} strokeLinecap="round" strokeLinejoin="round" />
-          </svg>);
-        } else if (el.type === "highlight") {
-          body = <div style={{ width: "100%", height: "100%", background: (el as HighlightElement).color }} />;
-        } else if (el.type === "underline") {
-          body = <div style={{ width: "100%", height: Math.max(1, 2 * props.scale), marginTop: el.height * props.scale - 2 * props.scale, background: (el as HighlightElement).color }} />;
-        } else if (el.type === "strikeout") {
-          body = <div style={{ width: "100%", height: Math.max(1, 2 * props.scale), marginTop: (el.height * props.scale) / 2, background: (el as HighlightElement).color }} />;
-        } else if (el.type === "squiggly") {
-          body = (<svg width="100%" height="100%" style={{ overflow: "visible" }}>
-            <polyline points={Array.from({ length: 10 }, (_, i) => `${i * (el.width / 9) * props.scale},${el.height * props.scale - (i % 2 === 0 ? 0 : 4 * props.scale)}`).join(" ")} fill="none" stroke={(el as HighlightElement).color} strokeWidth={1.6 * props.scale} />
-          </svg>);
-        } else if (el.type === "whiteout") {
-          body = <div style={{ width: "100%", height: "100%", background: (el as { color: string }).color || "#ffffff" }} />;
-        } else if (el.type === "image") {
-          body = <img src={(el as ImageElement).src} draggable={false} style={{ width: "100%", height: "100%", objectFit: "fill" }} />;
-        } else if (el.type === "sticky") {
-          const st = el as StickyElement;
-          body = (<div style={{ width: "100%", height: "100%", background: st.color, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, boxShadow: "0 2px 6px rgba(0,0,0,0.15)", padding: 4 * props.scale, overflow: "hidden" }}>
-            <textarea value={st.note} onChange={(e2) => props.onUpdateElement(el.id, { note: e2.target.value })} placeholder="Note…" style={{ width: "100%", height: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 11 * Math.max(1, props.scale), color: "#3F3300" }} />
-          </div>);
-        } else if (el.type === "field-text") {
-          const f = el as FieldTextElement;
-          body = <input value={f.value} placeholder={f.placeholder} onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })} onPointerDown={(e2) => e2.stopPropagation()} style={{ width: "100%", height: "100%", border: `${1.5 * props.scale}px solid #DC2626`, borderRadius: 4, background: "rgba(220,38,38,0.05)", fontSize: 12 * Math.max(1, props.scale), padding: `0 ${6 * props.scale}px`, outline: "none" }} />;
-        } else if (el.type === "field-checkbox") {
-          const f = el as FieldCheckboxElement;
-          body = (<div onPointerDown={(e2) => { e2.stopPropagation(); props.onUpdateElement(el.id, { checked: !f.checked }); }} style={{ width: "100%", height: "100%", border: `${1.5 * props.scale}px solid #DC2626`, borderRadius: 3, background: f.checked ? "#DC2626" : "rgba(220,38,38,0.05)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-            {f.checked && <Check style={{ width: "80%", height: "80%" }} className="text-white" />}
-          </div>);
-        } else if (el.type === "field-radio") {
-          const f = el as FieldRadioElement;
-          body = (<div onPointerDown={(e2) => { e2.stopPropagation(); props.onUpdateElement(el.id, { checked: !f.checked }); }} style={{ width: "100%", height: "100%", borderRadius: "50%", border: `${1.5 * props.scale}px solid #DC2626`, background: "rgba(220,38,38,0.05)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-            {f.checked && <div style={{ width: "55%", height: "55%", borderRadius: "50%", background: "#DC2626" }} />}
-          </div>);
-        } else if (el.type === "field-dropdown") {
-          const f = el as FieldDropdownElement;
-          body = (<select value={f.value} onChange={(e2) => props.onUpdateElement(el.id, { value: e2.target.value })} onPointerDown={(e2) => e2.stopPropagation()} style={{ width: "100%", height: "100%", border: `${1.5 * props.scale}px solid #DC2626`, borderRadius: 4, background: "rgba(220,38,38,0.05)", fontSize: 12 * Math.max(1, props.scale) }}>
-            {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>);
-        }
-
-        return (
-          <div key={el.id} style={{ ...style, pointerEvents: props.activeTool === "select" ? "auto" : "none" }}
-            onPointerDown={props.activeTool === "select" ? (e) => startMove(e, el) : undefined}
-            className={cn(selected && props.activeTool === "select" && "outline outline-2 outline-[#DC2626] outline-offset-1")}>
-            {body}
-            {selected && props.activeTool === "select" && props.selectedIds.size === 1 && el.type !== "draw" && !el.type.startsWith("field-") && (
-              <div onPointerDown={(e) => startResize(e, el)} style={{ position: "absolute", right: -5, bottom: -5, width: 10, height: 10, borderRadius: 3, background: "#DC2626", cursor: "nwse-resize" }} />
-            )}
-            {canRotate && (<div onPointerDown={(e) => startRotate(e, el)} style={{ position: "absolute", left: "50%", top: -22, width: 10, height: 10, marginLeft: -5, borderRadius: "50%", background: "#DC2626", cursor: "grab" }} />)}
-          </div>
-        );
-      })}
-
-      {draft && (<div style={{ position: "absolute", left: draft.x * props.scale, top: draft.y * props.scale, width: draft.w * props.scale, height: draft.h * props.scale, border: "1.5px dashed #DC2626", background: props.activeTool === "highlight" ? "rgba(253,224,71,0.35)" : "rgba(220,38,38,0.06)", pointerEvents: "none" }} />)}
-      {drawPoints && drawPoints.length > 1 && (
-        <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none", overflow: "visible" }}>
-          <polyline points={drawPoints.map((p) => `${p.x * props.scale},${p.y * props.scale}`).join(" ")} fill="none" stroke={props.drawStroke.color} strokeWidth={props.drawStroke.width * props.scale} strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+            setSavedSignatures(
+              getSavedSignatures(),
+            );
+          }}
+        />
       )}
-      {marquee && (<div style={{ position: "absolute", left: marquee.x * props.scale, top: marquee.y * props.scale, width: marquee.w * props.scale, height: marquee.h * props.scale, border: "1px dashed #DC2626", background: "rgba(220,38,38,0.08)", pointerEvents: "none" }} />)}
-      {eraserPos && (<div style={{ position: "absolute", left: (eraserPos.x - props.eraserSize) * props.scale, top: (eraserPos.y - props.eraserSize) * props.scale, width: props.eraserSize * 2 * props.scale, height: props.eraserSize * 2 * props.scale, borderRadius: "50%", border: "2px solid #DC2626", background: "rgba(220,38,38,0.08)", pointerEvents: "none" }} />)}
     </div>
   );
 }
 
-/* =========================================================  SIGNATURE MODAL  ========================================================= */
-function SignatureModal({
-  onInsert,
-  onCancel,
-  savedSignatures,
-  onDeleteSaved,
+function SuccessScreen({
+  result,
+  onDownload,
+  onEditAgain,
+  onNewFile,
 }: {
-  onInsert: (src: string, save: boolean) => void;
-  onCancel: () => void;
-  savedSignatures: SavedSignature[];
-  onDeleteSaved: (id: string) => void;
+  result: SuccessState;
+  onDownload: () => void;
+  onEditAgain: () => void;
+  onNewFile: () => void;
 }) {
-  const [tab, setTab] = useState<"draw" | "type" | "upload" | "saved">("draw");
-  const [typedName, setTypedName] = useState("");
-  const [sigFont, setSigFont] = useState("Dancing Script");
-  const [sigColor, setSigColor] = useState("#111827");
-  const [sigSize, setSigSize] = useState(52);
-  const [saveAfterInsert, setSaveAfterInsert] = useState(true);
-  const [hasDrawing, setHasDrawing] = useState(false);
-  const [uploadedSignature, setUploadedSignature] = useState<string | null>(null);
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const uploadSignatureInputRef = useRef<HTMLInputElement | null>(null);
-  const isDrawing = useRef(false);
-  const lastPoint = useRef<{ x: number; y: number } | null>(null);
-  const canvasRectRef = useRef<DOMRect | null>(null);
-  const dprRef = useRef(1);
-
-  useEffect(() => {
-    SIG_FONTS.forEach(({ family }) => {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(
-        family
-      ).replace(/%20/g, "+")}:wght@400;700&display=swap`;
-      document.head.appendChild(link);
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const setupCanvas = () => {
-      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-      const cssW = canvas.clientWidth || 460;
-      const cssH = canvas.clientHeight || 160;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      canvas.width = Math.round(cssW * dpr);
-      canvas.height = Math.round(cssH * dpr);
-      canvas.style.width = `${cssW}px`;
-      canvas.style.height = `${cssH}px`;
-      dprRef.current = dpr;
-      ctx.scale(dpr, dpr);
-      ctx.setLineDash([]);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-    };
-
-    const raf = requestAnimationFrame(setupCanvas);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  function getPointerPos(e: React.PointerEvent<HTMLCanvasElement>) {
-    const rect = canvasRectRef.current;
-
-    if (!rect) {
-      return { x: 0, y: 0 };
-    }
-
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
-  }
-
-  function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    e.preventDefault();
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    // Cache the canvas position for the entire stroke.
-    canvasRectRef.current = canvas.getBoundingClientRect();
-
-    canvas.setPointerCapture(e.pointerId);
-    isDrawing.current = true;
-
-    const pos = getPointerPos(e);
-    lastPoint.current = pos;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.strokeStyle = sigColor;
-    ctx.fillStyle = sigColor;
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.setLineDash([]);
-
-    // Draw the initial dot so a short click still creates a mark.
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 1.25, 0, Math.PI * 2);
-    ctx.fill();
-
-    setHasDrawing(true);
-  }
-
-  function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!isDrawing.current || !lastPoint.current) return;
-
-    e.preventDefault();
-
-    const canvas = canvasRef.current;
-    const rect = canvasRectRef.current;
-
-    if (!canvas || !rect) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.strokeStyle = sigColor;
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.setLineDash([]);
-
-    const nativeEvent = e.nativeEvent;
-
-    const events =
-      typeof (nativeEvent as PointerEvent).getCoalescedEvents === "function"
-        ? (nativeEvent as PointerEvent).getCoalescedEvents()
-        : [nativeEvent];
-
-    ctx.beginPath();
-    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
-
-    let pos = lastPoint.current;
-
-    for (const event of events) {
-      pos = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-
-      ctx.lineTo(pos.x, pos.y);
-    }
-
-    ctx.stroke();
-
-    lastPoint.current = pos;
-  }
-
-  function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
-    isDrawing.current = false;
-    lastPoint.current = null;
-    canvasRectRef.current = null;
-
-    const canvas = canvasRef.current;
-
-    if (canvas && e.pointerId != null) {
-      try {
-        canvas.releasePointerCapture(e.pointerId);
-      } catch {
-        // Pointer capture may already be released.
-      }
-    }
-  }
-
-  function onPointerCancel() {
-    isDrawing.current = false;
-    lastPoint.current = null;
-    canvasRectRef.current = null;
-  }
-
-  function clearCanvas() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.clearRect(
-      0,
-      0,
-      canvas.width / dprRef.current,
-      canvas.height / dprRef.current
-    );
-
-    isDrawing.current = false;
-    lastPoint.current = null;
-    canvasRectRef.current = null;
-    setHasDrawing(false);
-  }
-
-  function handleSignatureUpload(file: File | undefined) {
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please upload an image file.");
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Signature image must be smaller than 5 MB.");
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      setUploadedSignature(String(reader.result));
-    };
-
-    reader.onerror = () => {
-      toast.error("Could not read the signature image.");
-    };
-
-    reader.readAsDataURL(file);
-  }
-
-  async function handleInsert() {
-    if (tab === "draw") {
-      if (!hasDrawing) {
-        toast.error("Please draw your signature first.");
-        return;
-      }
-
-      const canvas = canvasRef.current;
-
-      if (!canvas) return;
-
-      onInsert(
-        canvas.toDataURL("image/png"),
-        saveAfterInsert
-      );
-
-      return;
-    }
-
-    if (tab === "type") {
-      const name = typedName.trim() || "Signature";
-
-      const canvas = document.createElement("canvas");
-
-      canvas.width = 480;
-      canvas.height = 140;
-
-      const ctx = canvas.getContext("2d");
-
-      if (!ctx) return;
-
-      await document.fonts.ready;
-
-      ctx.font = `${sigSize}px '${sigFont}', cursive`;
-      ctx.fillStyle = sigColor;
-      ctx.textBaseline = "middle";
-
-      const w = ctx.measureText(name).width;
-
-      ctx.fillText(
-        name,
-        Math.max(8, (480 - w) / 2),
-        70
-      );
-
-      onInsert(
-        canvas.toDataURL("image/png"),
-        saveAfterInsert
-      );
-
-      return;
-    }
-
-    if (tab === "upload") {
-      if (!uploadedSignature) {
-        toast.error("Please upload your signature image first.");
-        return;
-      }
-
-      onInsert(
-        uploadedSignature,
-        saveAfterInsert
-      );
-    }
-  }
-
   return (
-    <div
-      className="fixed inset-0 z-[999999] grid place-items-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onCancel}
-    >
-      <div
-        className="w-full max-w-xl rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-2xl"
-        onClick={(e: ReactMouseEvent) => e.stopPropagation()}
-      >
-        {/* TITLE */}
-        <div className="mb-4 text-lg font-bold text-gray-900 dark:text-gray-100">
-          Add signature
-        </div>
+    <div className="fixed inset-0 z-[9999] grid place-items-center overflow-y-auto bg-slate-100 p-6 dark:bg-slate-950">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col items-center gap-5 border-b border-slate-100 px-7 py-8 text-center dark:border-slate-800">
+          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10">
+            <span className="text-2xl">
+              ✓
+            </span>
+          </div>
 
-        {/* TABS */}
-        <div className="mb-5 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-800">
-          {(
-            ["draw", "type", "upload", "saved"] as const
-          ).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                "flex-1 min-w-[90px] whitespace-nowrap pb-2 text-sm font-semibold transition-all border-b-2",
-                tab === t
-                  ? "border-[#DC2626] text-[#DC2626]"
-                  : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-300"
-              )}
-            >
-              {t === "saved"
-                ? `Saved (${savedSignatures.length})`
-                : t === "upload"
-                  ? "Upload"
-                  : t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        {/* DRAW */}
-        {tab === "draw" && (
           <div>
-            <canvas
-              ref={canvasRef}
-              className="w-full h-40 cursor-crosshair rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
-              style={{ touchAction: "none" }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerUp}
-              onPointerCancel={onPointerCancel}
-            />
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
+              PDF saved
+            </h2>
 
-            <div className="mt-3 flex items-center gap-3">
-              <label className="text-xs text-gray-500">
-                Ink color
-              </label>
-
-              <input
-                type="color"
-                value={sigColor}
-                onChange={(e) => setSigColor(e.target.value)}
-                className="w-8 h-8 rounded cursor-pointer border border-gray-200"
-              />
-
-              <button
-                onClick={clearCanvas}
-                className="ml-auto text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 font-medium"
-              >
-                Clear
-              </button>
-            </div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {
+                result.filename
+              }
+            </p>
           </div>
-        )}
+        </div>
 
-        {/* TYPE */}
-        {tab === "type" && (
-          <div className="space-y-4">
-            <input
-              autoFocus
-              value={typedName}
-              onChange={(e) => setTypedName(e.target.value)}
-              placeholder="Type your name"
-              className="w-full h-16 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 text-center focus:outline-none focus:border-[#DC2626] transition-colors"
-              style={{
-                fontFamily: `'${sigFont}', cursive`,
-                fontSize: Math.min(sigSize * 0.7, 42),
-                color: sigColor,
-              }}
-            />
-
-            <div>
-              <div className="text-xs font-medium text-gray-500 mb-2">
-                Style
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                {SIG_FONTS.map((f) => (
-                  <button
-                    key={f.family}
-                    onClick={() => setSigFont(f.family)}
-                    className={cn(
-                      "py-3 px-2 rounded-lg border text-center transition-all overflow-hidden min-h-[56px]",
-                      sigFont === f.family
-                        ? "border-[#DC2626] bg-red-50 dark:bg-red-900/20"
-                        : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    )}
-                    style={{
-                      fontFamily: `'${f.family}', cursive`,
-                      fontSize: 22,
-                      color: sigColor,
-                    }}
-                  >
-                    {typedName || "Sign"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 flex-wrap">
-              <label className="text-xs text-gray-500">
-                Color
-              </label>
-
-              <input
-                type="color"
-                value={sigColor}
-                onChange={(e) => setSigColor(e.target.value)}
-                className="w-8 h-8 rounded cursor-pointer border border-gray-200"
-              />
-
-              <label className="text-xs text-gray-500 ml-2">
-                Size
-              </label>
-
-              <input
-                type="range"
-                min={24}
-                max={80}
-                value={sigSize}
-                onChange={(e) =>
-                  setSigSize(Number(e.target.value))
+        <div className="grid gap-6 p-7 sm:grid-cols-[180px_1fr]">
+          <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+            {result.thumb && (
+              <img
+                src={
+                  result.thumb
                 }
-                className="flex-1 min-w-[80px] accent-[#DC2626]"
+                alt="Saved PDF preview"
+                className="h-full w-full object-contain"
               />
-            </div>
+            )}
           </div>
-        )}
 
-        {/* UPLOAD */}
-        {tab === "upload" && (
-          <div className="space-y-4">
-            <input
-              ref={uploadSignatureInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
-              className="hidden"
-              onChange={(e) => {
-                handleSignatureUpload(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
+          <div className="flex flex-col justify-center">
+            <div className="text-sm text-slate-500 dark:text-slate-400">
+              {
+                result.pages
+              }{" "}
+              {
+                result.pages ===
+                1
+                  ? "page"
+                  : "pages"
+              }
+            </div>
 
-            {!uploadedSignature ? (
+            <h3 className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">
+              Your edited document is ready.
+            </h3>
+
+            <div className="mt-6 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() =>
-                  uploadSignatureInputRef.current?.click()
+                onClick={
+                  onDownload
                 }
-                className="w-full rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-6 py-12 text-center hover:border-[#DC2626] hover:bg-red-50/50 dark:hover:bg-red-900/10 transition-colors"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700"
               >
-                <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
-                  <ImageIcon className="h-6 w-6 text-[#DC2626]" />
-                </div>
-
-                <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  Upload signature image
-                </div>
-
-                <div className="mt-1 text-xs text-gray-500">
-                  PNG, JPG, WEBP or SVG · Max 5 MB
-                </div>
+                Download PDF
               </button>
-            ) : (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="text-xs font-semibold text-gray-500">
-                    Signature preview
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setUploadedSignature(null)}
-                    className="text-xs font-semibold text-gray-500 hover:text-red-600"
-                  >
-                    Remove
-                  </button>
-                </div>
-
-                <div className="flex min-h-40 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-5">
-                  <img
-                    src={uploadedSignature}
-                    alt="Uploaded signature preview"
-                    className="max-h-32 max-w-full object-contain"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    uploadSignatureInputRef.current?.click()
-                  }
-                  className="mt-3 w-full rounded-lg border border-gray-200 dark:border-gray-700 py-2 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  Choose another image
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* SAVED */}
-        {tab === "saved" && (
-          <div className="grid max-h-64 grid-cols-2 gap-3 overflow-auto">
-            {savedSignatures.length === 0 && (
-              <div className="col-span-2 py-8 text-center text-sm text-gray-500">
-                No saved signatures yet.
-              </div>
-            )}
-
-            {savedSignatures.map((s) => (
-              <div
-                key={s.id}
-                className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2"
+              <button
+                type="button"
+                onClick={
+                  onEditAgain
+                }
+                className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
-                <img
-                  src={s.src}
-                  alt="Saved signature"
-                  className="h-16 w-full object-contain mb-2"
-                />
+                Keep editing
+              </button>
 
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => onInsert(s.src, false)}
-                    className="flex-1 py-1.5 rounded bg-[#DC2626] text-xs font-bold text-white hover:bg-[#B91C1C]"
-                  >
-                    Insert
-                  </button>
-
-                  <button
-                    onClick={() => onDeleteSaved(s.id)}
-                    className="w-8 flex items-center justify-center rounded border border-gray-200 text-gray-500 hover:text-red-600 hover:bg-red-50"
-                    title="Delete saved signature"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
+              <button
+                type="button"
+                onClick={
+                  onNewFile
+                }
+                className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                New PDF
+              </button>
+            </div>
           </div>
-        )}
-
-        {/* SAVE FOR LATER */}
-        {tab !== "saved" && (
-          <label className="mt-4 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={saveAfterInsert}
-              onChange={(e) =>
-                setSaveAfterInsert(e.target.checked)
-              }
-              className="accent-[#DC2626] w-4 h-4"
-            />
-
-            Save signature for later
-          </label>
-        )}
-
-        {/* ACTIONS */}
-        <div className="mt-6 flex justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={onCancel}
-            className="rounded-lg border-gray-300 dark:border-gray-700 font-semibold"
-          >
-            Cancel
-          </Button>
-
-          {tab !== "saved" && (
-            <Button
-              onClick={handleInsert}
-              className="rounded-lg bg-[#DC2626] text-white hover:bg-[#B91C1C] font-bold px-6"
-            >
-              Insert
-            </Button>
-          )}
         </div>
       </div>
     </div>
-  );
-}
-/* =========================================================  SUCCESS SCREEN  ========================================================= */
-function SuccessScreen({ result, onDownload, onEditAgain, onNewFile }: { result: { blob: Blob; filename: string; thumb: string | null; pages: number }; onDownload: () => void; onEditAgain: () => void; onNewFile: () => void }) {
-  return (
-    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="max-w-2xl mx-auto overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-2xl">
-      <div className="border-b border-gray-200 dark:border-gray-800 bg-red-50/50 dark:bg-red-900/10 px-8 py-6">
-        <div className="flex items-center gap-4">
-          <div className="grid h-14 w-14 place-items-center rounded-full bg-[#DC2626] text-white shadow-sm"><FileCheck2 className="h-7 w-7" /></div>
-          <div>
-            <div className="text-2xl font-bold">PDF ready to download</div>
-            <div className="text-sm text-gray-500 mt-1">{result.filename} · {formatBytes(result.blob.size)} · {result.pages} pages</div>
-          </div>
-        </div>
-      </div>
-      <div className="grid gap-8 p-8 md:grid-cols-[minmax(0,1fr)_260px]">
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800 p-4 flex items-center justify-center">
-          {result.thumb ? <img src={result.thumb} alt="Page 1 preview" className="max-h-[380px] object-contain shadow-lg rounded border border-gray-200 bg-white" /> : <div className="text-sm text-gray-500">Preview unavailable</div>}
-        </div>
-        <div className="flex flex-col gap-3 justify-center">
-          <Button size="lg" onClick={onDownload} className="w-full rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white font-bold h-14 shadow-md text-base"><Download className="mr-2 h-5 w-5" /> Download PDF</Button>
-          <div className="h-px bg-gray-100 dark:bg-gray-800 my-2" />
-          <Button size="lg" variant="outline" onClick={onEditAgain} className="w-full rounded-lg border-gray-300 dark:border-gray-700 font-semibold h-12">Continue editing</Button>
-          <Button size="lg" variant="ghost" onClick={onNewFile} className="w-full rounded-lg text-gray-500 font-semibold h-12">Upload new file</Button>
-        </div>
-      </div>
-    </motion.div>
   );
 }
